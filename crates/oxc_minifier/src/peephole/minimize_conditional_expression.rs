@@ -19,12 +19,11 @@ impl<'a> PeepholeOptimizations {
         ctx: &mut TraverseCtx<'a>,
     ) -> Expression<'a> {
         // Wrap the fresh conditional in an `Expression` slot so that, if the
-        // fold returns a replacement, it is routed through
-        // `ctx.replace_expression` like every other slot replacement. The
-        // discarded transient `ConditionalExpression` leaves refs in its
-        // untouched slots (e.g. the leftover `b` in `b == null ? c : b` ->
-        // `b ?? c`), which the incremental-scoping follow-up reclaims at this
-        // slot.
+        // fold returns a replacement, `ctx.replace_expression` can walk the
+        // mutated transient conditional and mark its leaked refs dead. Without
+        // the slot wrapping, refs left in untouched slots of the discarded
+        // transient `ConditionalExpression` (e.g. the leftover `b` in
+        // `b == null ? c : b` -> `b ?? c`) would never reach `PassDirty`.
         let mut as_expr = ctx.ast.expression_conditional(span, test, consequent, alternate);
         let Expression::ConditionalExpression(cond_box) = &mut as_expr else { unreachable!() };
         let folded = Self::minimize_conditional_expression(cond_box, ctx);

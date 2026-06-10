@@ -25,14 +25,15 @@ use oxc_syntax::{
 };
 use rustc_hash::FxHashSet;
 
-use oxc_allocator::{Allocator, BitSet, Vec};
+use oxc_allocator::Vec;
 use oxc_ast::ast::*;
 
 use crate::{ReusableTraverseCtx, Traverse, TraverseCtx, minifier_traverse::traverse_mut_with_ctx};
 
 pub use self::normalize::{Normalize, NormalizeOptions};
 
-/// Stateless peephole optimizer. The `dce` flag and the mutation signal are stored in `MinifierState`.
+/// Stateless peephole optimizer. The `dce` flag, the `mutated` signal, and
+/// the per-pass `PassDirty` accumulator all live on `MinifierState`.
 pub struct PeepholeOptimizations;
 
 impl<'a> PeepholeOptimizations {
@@ -156,32 +157,82 @@ impl<'a> PeepholeOptimizations {
             }
         }
     }
+
+    /// Debug-only guard for the incremental scoping refresh.
+    ///
+    /// Every `ReferenceId` whose bit is set in `dead_refs` is about to be
+    /// removed from each symbol's resolved-reference list by
+    /// `retain_resolved_references_excluding`. Such a reference MUST no longer
+    /// appear anywhere in the live program — otherwise a still-live reference
+    /// is being pruned, leaving a symbol looking under-referenced so a later
+    /// pass can wrongly drop it (the unsafe direction that produces incorrect
+    /// output).
+    ///
+    /// This walks the live program once per dirty pass in debug builds only, so
+    /// the entire unit-test and `cargo coverage -- minifier` corpus doubles as
+    /// an over-prune detector at zero release cost. Resolved references only;
+    /// unresolved references are not tracked. Allocates nothing: each live
+    /// reference is checked against `dead_refs` directly.
+    #[cfg(debug_assertions)]
+    fn debug_assert_no_over_prune(program: &Program<'a>, dead_refs: &oxc_allocator::BitSet<'_>) {
+        struct OverPruneCheck<'b, 'c> {
+            dead_refs: &'b oxc_allocator::BitSet<'c>,
+        }
+        impl<'a> Visit<'a> for OverPruneCheck<'_, '_> {
+            fn visit_identifier_reference(&mut self, it: &IdentifierReference<'a>) {
+                let Some(reference_id) = it.reference_id.get() else { return };
+                let idx = reference_id.index();
+                // Refs minted mid-pass have `idx >= capacity` and are never in
+                // `dead_refs`; this mirrors the guard in
+                // `retain_resolved_references_excluding`.
+                assert!(
+                    idx >= self.dead_refs.capacity() || !self.dead_refs.has_bit(idx),
+                    "incremental scoping over-prune: reference {idx} is marked dead but still \
+                     appears in the live program",
+                );
+            }
+        }
+        OverPruneCheck { dead_refs }.visit_program(program);
+    }
 }
 
 impl<'a> Traverse<'a> for PeepholeOptimizations {
     fn enter_program(&mut self, _program: &mut Program<'a>, ctx: &mut TraverseCtx<'a>) {
         ctx.state.symbol_values.reset();
         ctx.state.proto_write_symbols.clear();
+        // (Re-)allocate `dead_refs` sized to current `references_len()`.
+        // `references_len` can grow between passes as helpers mint fresh refs,
+        // so we allocate a new bitset each pass rather than `clear()`-ing.
+        // Arena reclaims the prior allocation at program end.
+        let refs_len = ctx.scoping().references_len();
+        ctx.state.dirty.init(refs_len, ctx.ast.allocator);
     }
 
     fn exit_program(&mut self, program: &mut Program<'a>, ctx: &mut TraverseCtx<'a>) {
-        // Transitional: removed in the incremental-scoping PR together with the collector gate.
-        if ctx.state.was_mutated() {
-            // Walk the live AST to collect data the peephole pass left stale:
-            // - Live `IdentifierReference` IDs, so dead references can be batch-pruned
-            //   from each symbol's reference list (individual deletion via
-            //   `delete_resolved_reference` is O(n) per call, O(n²) over many removals,
-            //   which shows up in bundler output with thousands of unused
-            //   `var import_X = __toESM(require_Y())` declarations).
-            // - Scopes that still contain a direct `eval()` call, needed by
-            //   `refresh_direct_eval_flags`.
-            let mut collector = LiveUsageCollector::new(ctx.scoping(), ctx.ast.allocator);
-            collector.visit_program(program);
-            let LiveUsageCollector { refs, direct_eval_scopes, .. } = collector;
-            let scoping = ctx.scoping_mut();
-            scoping.retain_resolved_references(&refs);
-            Self::refresh_direct_eval_flags(scoping, &direct_eval_scopes);
+        // (1) Resolved references — direct consumption, no walk.
+        //     Per-pass dirty data is built by `replace_*` / `drop_*` helpers as
+        //     subtrees are removed and is consumed here in one batch.
+        if !ctx.state.dirty.dead_refs.is_empty() {
+            // Debug-only guard: every reference we are about to prune must
+            // really be gone from the live program (see the helper).
+            #[cfg(debug_assertions)]
+            Self::debug_assert_no_over_prune(program, &ctx.state.dirty.dead_refs);
+
+            // Disjoint-field borrows: `state.dirty` and `scoping` don't overlap.
+            ctx.scoping
+                .scoping_mut()
+                .retain_resolved_references_excluding(&ctx.state.dirty.dead_refs);
         }
+
+        // (2) Direct-eval — gated full walk only when an eval was dropped.
+        if ctx.state.dirty.eval_dropped {
+            let scoping = ctx.scoping();
+            let mut live = LiveDirectEvalCollector::new(scoping);
+            live.visit_program(program);
+            let scopes = live.scopes;
+            Self::refresh_direct_eval_flags(ctx.scoping_mut(), &scopes);
+        }
+
         // Only check class_symbols_stack in full optimization mode (not DCE mode)
         debug_assert!(ctx.state.dce || ctx.state.class_symbols_stack.is_exhausted());
     }
@@ -563,39 +614,31 @@ impl<'a> Traverse<'a> for PeepholeOptimizations {
     }
 }
 
-struct LiveUsageCollector<'a, 's> {
+/// Walks the live program to find scopes containing direct `eval(...)` calls.
+/// Used by `exit_program` only when at least one direct eval call was dropped
+/// this pass (gated via `PassDirty::eval_dropped`).
+struct LiveDirectEvalCollector<'s> {
     scoping: &'s Scoping,
-    /// Bitset of live `ReferenceId`s. Sized to `scoping.references_len()` at construction.
-    /// Replaces a `FxHashSet<ReferenceId>`: insert + contains drop from ~25 cycles to ~5,
-    /// and the per-file memory footprint goes from MB-scale to KB-scale.
-    refs: BitSet<'a>,
-    direct_eval_scopes: FxHashSet<ScopeId>,
+    scopes: FxHashSet<ScopeId>,
 }
 
-impl<'a, 's> LiveUsageCollector<'a, 's> {
-    fn new(scoping: &'s Scoping, allocator: &'a Allocator) -> Self {
-        Self {
-            scoping,
-            refs: BitSet::new_in(scoping.references_len(), allocator),
-            direct_eval_scopes: FxHashSet::default(),
-        }
+impl<'s> LiveDirectEvalCollector<'s> {
+    fn new(scoping: &'s Scoping) -> Self {
+        Self { scoping, scopes: FxHashSet::default() }
     }
 }
 
-impl<'a> Visit<'a> for LiveUsageCollector<'_, '_> {
+impl<'a> Visit<'a> for LiveDirectEvalCollector<'_> {
     fn visit_call_expression(&mut self, it: &CallExpression<'a>) {
         if !it.optional
             && let Some(ident) = it.callee.get_identifier_reference()
             && ident.name == "eval"
+            && let Some(reference_id) = ident.reference_id.get()
         {
-            let scope_id = self.scoping.get_reference(ident.reference_id()).scope_id();
-            self.direct_eval_scopes.insert(scope_id);
+            let scope_id = self.scoping.get_reference(reference_id).scope_id();
+            self.scopes.insert(scope_id);
         }
         // Recurse — `eval` may be nested in another call's arguments, e.g. `foo(eval('x'))`.
         walk_call_expression(self, it);
-    }
-
-    fn visit_identifier_reference(&mut self, it: &IdentifierReference<'a>) {
-        self.refs.set_bit(it.reference_id().index());
     }
 }
