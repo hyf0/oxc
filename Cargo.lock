@@ -36,6 +36,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a23eb6b1614318a8071c9b2521f36b424b2c83db5eb3a0fead4a6c0809af6e61"
 
 [[package]]
+name = "apollo-parser"
+version = "0.8.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "11f6e2be4b3474e5890d34d3e483d49ec9b5cbf9e358bc62c9cc5423376df54b"
+dependencies = [
+ "memchr",
+ "rowan",
+ "thiserror",
+]
+
+[[package]]
 name = "approx"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -365,6 +376,12 @@ checksum = "77745e017f5edba1a9c1d854f6f3a52dac8a12dd5af5d2f54aecf61e43d80d30"
 dependencies = [
  "libm",
 ]
+
+[[package]]
+name = "countme"
+version = "3.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7704b5fdd17b18ae31c4c1da5a2e0305a2bf17b5249300a9ee9ed7b72114c636"
 
 [[package]]
 name = "cow-utils"
@@ -1626,7 +1643,7 @@ dependencies = [
  "napi-build",
  "napi-sys",
  "nohash-hasher",
- "rustc-hash",
+ "rustc-hash 2.1.2",
  "serde",
  "serde_json",
  "tokio",
@@ -1831,7 +1848,7 @@ checksum = "209091efbb07de356beae15cf5fd8bd2b3ab94a17f19cc19a7f8b094aec2559c"
 dependencies = [
  "flate2",
  "postcard",
- "rustc-hash",
+ "rustc-hash 2.1.2",
  "serde",
  "thiserror",
 ]
@@ -1894,7 +1911,7 @@ dependencies = [
  "oxc_estree",
  "quickcheck",
  "rand",
- "rustc-hash",
+ "rustc-hash 2.1.2",
  "serde",
  "serde_json",
  "windows-sys 0.61.2",
@@ -1954,7 +1971,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "rayon",
- "rustc-hash",
+ "rustc-hash 2.1.2",
  "serde",
  "serde_json",
  "syn",
@@ -1994,7 +2011,7 @@ dependencies = [
  "oxc_span",
  "oxc_tasks_common",
  "oxc_transformer",
- "rustc-hash",
+ "rustc-hash 2.1.2",
  "serde",
  "serde_json",
 ]
@@ -2008,7 +2025,7 @@ dependencies = [
  "oxc_index",
  "oxc_syntax",
  "petgraph",
- "rustc-hash",
+ "rustc-hash 2.1.2",
 ]
 
 [[package]]
@@ -2031,7 +2048,7 @@ dependencies = [
  "oxc_str",
  "oxc_syntax",
  "pico-args",
- "rustc-hash",
+ "rustc-hash 2.1.2",
 ]
 
 [[package]]
@@ -2041,7 +2058,7 @@ dependencies = [
  "cow-utils",
  "oxc-browserslist",
  "oxc_syntax",
- "rustc-hash",
+ "rustc-hash 2.1.2",
  "serde",
 ]
 
@@ -2067,7 +2084,7 @@ dependencies = [
  "ignore",
  "oxc-schemars",
  "oxc_diagnostics",
- "rustc-hash",
+ "rustc-hash 2.1.2",
  "serde",
  "serde_json",
  "tempfile",
@@ -2091,7 +2108,7 @@ dependencies = [
  "phf",
  "pico-args",
  "rayon",
- "rustc-hash",
+ "rustc-hash 2.1.2",
  "saphyr",
  "serde",
  "serde_json",
@@ -2175,7 +2192,7 @@ dependencies = [
  "oxc_tasks_common",
  "phf",
  "pico-args",
- "rustc-hash",
+ "rustc-hash 2.1.2",
  "serde",
  "serde_json",
  "smallvec",
@@ -2190,9 +2207,24 @@ dependencies = [
  "oxc_allocator",
  "oxc_data_structures",
  "oxc_span",
- "rustc-hash",
+ "rustc-hash 2.1.2",
  "serde_json",
  "unicode-width",
+]
+
+[[package]]
+name = "oxc_formatter_graphql"
+version = "0.54.0"
+dependencies = [
+ "apollo-parser",
+ "cow-utils",
+ "insta",
+ "oxc_allocator",
+ "oxc_diagnostics",
+ "oxc_formatter_core",
+ "oxc_span",
+ "oxc_tasks_common",
+ "pico-args",
 ]
 
 [[package]]
@@ -2238,7 +2270,7 @@ dependencies = [
  "oxc_span",
  "oxc_str",
  "oxc_syntax",
- "rustc-hash",
+ "rustc-hash 2.1.2",
 ]
 
 [[package]]
@@ -2247,7 +2279,7 @@ version = "0.135.0"
 dependencies = [
  "oxc_ast",
  "oxc_span",
- "rustc-hash",
+ "rustc-hash 2.1.2",
 ]
 
 [[package]]
@@ -2257,7 +2289,7 @@ dependencies = [
  "cow-utils",
  "futures",
  "papaya",
- "rustc-hash",
+ "rustc-hash 2.1.2",
  "serde",
  "serde_json",
  "tokio",
@@ -2312,7 +2344,7 @@ dependencies = [
  "phf",
  "rayon",
  "rust-lapper",
- "rustc-hash",
+ "rustc-hash 2.1.2",
  "self_cell",
  "serde",
  "serde_json",
@@ -2329,7 +2361,7 @@ dependencies = [
  "proc-macro2",
  "project-root",
  "quote",
- "rustc-hash",
+ "rustc-hash 2.1.2",
  "syn",
 ]
 
@@ -2358,7 +2390,7 @@ dependencies = [
  "oxc_span",
  "oxc_str",
  "oxc_syntax",
- "rustc-hash",
+ "rustc-hash 2.1.2",
 ]
 
 [[package]]
@@ -2387,7 +2419,7 @@ dependencies = [
  "oxc_syntax",
  "oxc_traverse",
  "pico-args",
- "rustc-hash",
+ "rustc-hash 2.1.2",
 ]
 
 [[package]]
@@ -2425,7 +2457,7 @@ dependencies = [
  "oxc_tasks_common",
  "oxc_transformer_plugins",
  "pico-args",
- "rustc-hash",
+ "rustc-hash 2.1.2",
  "similar-asserts",
 ]
 
@@ -2463,7 +2495,7 @@ dependencies = [
  "oxc_str",
  "oxc_syntax",
  "pico-args",
- "rustc-hash",
+ "rustc-hash 2.1.2",
  "seq-macro",
 ]
 
@@ -2481,7 +2513,7 @@ dependencies = [
  "oxc_estree_tokens",
  "oxc_napi",
  "oxc_str",
- "rustc-hash",
+ "rustc-hash 2.1.2",
 ]
 
 [[package]]
@@ -2498,7 +2530,7 @@ dependencies = [
  "oxc_linter",
  "oxc_napi",
  "oxc_transformer_plugins",
- "rustc-hash",
+ "rustc-hash 2.1.2",
  "serde",
  "serde_json",
 ]
@@ -2513,12 +2545,13 @@ dependencies = [
  "oxc_ast_visit",
  "oxc_formatter",
  "oxc_formatter_core",
+ "oxc_formatter_graphql",
  "oxc_formatter_json",
  "oxc_parser",
  "oxc_span",
  "oxc_tasks_common",
  "pico-args",
- "rustc-hash",
+ "rustc-hash 2.1.2",
  "serde_json",
  "similar 3.1.1",
  "walkdir",
@@ -2541,7 +2574,7 @@ dependencies = [
  "oxc_semantic",
  "oxc_span",
  "oxc_syntax",
- "rustc-hash",
+ "rustc-hash 2.1.2",
  "serde_json",
 ]
 
@@ -2557,7 +2590,7 @@ dependencies = [
  "oxc_span",
  "oxc_str",
  "phf",
- "rustc-hash",
+ "rustc-hash 2.1.2",
  "unicode-id-start",
 ]
 
@@ -2576,7 +2609,7 @@ dependencies = [
  "once_cell",
  "papaya",
  "percent-encoding",
- "rustc-hash",
+ "rustc-hash 2.1.2",
  "rustix",
  "self_cell",
  "serde",
@@ -2620,7 +2653,7 @@ dependencies = [
  "oxc_span",
  "oxc_str",
  "oxc_syntax",
- "rustc-hash",
+ "rustc-hash 2.1.2",
  "self_cell",
  "serde_json",
  "smallvec",
@@ -2637,7 +2670,7 @@ dependencies = [
  "napi",
  "napi-build",
  "napi-derive",
- "rustc-hash",
+ "rustc-hash 2.1.2",
  "serde",
  "serde_json",
 ]
@@ -2710,7 +2743,7 @@ dependencies = [
  "oxc_semantic",
  "oxc_str",
  "oxc_syntax",
- "rustc-hash",
+ "rustc-hash 2.1.2",
 ]
 
 [[package]]
@@ -2753,7 +2786,7 @@ dependencies = [
  "oxc_napi",
  "oxc_react_compiler",
  "oxc_sourcemap",
- "rustc-hash",
+ "rustc-hash 2.1.2",
 ]
 
 [[package]]
@@ -2783,7 +2816,7 @@ dependencies = [
  "oxc_syntax",
  "oxc_traverse",
  "pico-args",
- "rustc-hash",
+ "rustc-hash 2.1.2",
  "serde",
  "serde_json",
  "sha1",
@@ -2813,7 +2846,7 @@ dependencies = [
  "oxc_transformer",
  "oxc_traverse",
  "pico-args",
- "rustc-hash",
+ "rustc-hash 2.1.2",
 ]
 
 [[package]]
@@ -2830,7 +2863,7 @@ dependencies = [
  "oxc_span",
  "oxc_str",
  "oxc_syntax",
- "rustc-hash",
+ "rustc-hash 2.1.2",
 ]
 
 [[package]]
@@ -2861,7 +2894,7 @@ dependencies = [
  "oxc_span",
  "phf",
  "rayon",
- "rustc-hash",
+ "rustc-hash 2.1.2",
  "serde",
  "serde_json",
  "simdutf8",
@@ -2902,7 +2935,7 @@ dependencies = [
  "oxc_span",
  "oxc_str",
  "rayon",
- "rustc-hash",
+ "rustc-hash 2.1.2",
  "serde",
  "serde_json",
  "tempfile",
@@ -3261,6 +3294,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "rowan"
+version = "0.16.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "417a3a9f582e349834051b8a10c8d71ca88da4211e4093528e36b9845f6b5f21"
+dependencies = [
+ "countme",
+ "hashbrown 0.14.5",
+ "rustc-hash 1.1.0",
+ "text-size",
+]
+
+[[package]]
 name = "rulegen"
 version = "0.0.0"
 dependencies = [
@@ -3275,7 +3320,7 @@ dependencies = [
  "oxc_span",
  "oxc_tasks_common",
  "proc-macro2",
- "rustc-hash",
+ "rustc-hash 2.1.2",
  "serde",
  "serde_json",
  "syn",
@@ -3289,6 +3334,12 @@ checksum = "2274b9cc4f205bc0945b7be3e4fc1a102b0b7119ba6482faaedb9c4f76dde5d1"
 dependencies = [
  "num-traits",
 ]
+
+[[package]]
+name = "rustc-hash"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "08d43f7aa6b08d49f382cde6a7982047c3426db949b1424bc4b7ec9ae12c6ce2"
 
 [[package]]
 name = "rustc-hash"
@@ -3698,6 +3749,12 @@ dependencies = [
  "rustix",
  "windows-sys 0.52.0",
 ]
+
+[[package]]
+name = "text-size"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f18aa187839b2bdb1ad2fa35ead8c4c2976b64e4363c386d45ac0f7ee85c9233"
 
 [[package]]
 name = "textwrap"
