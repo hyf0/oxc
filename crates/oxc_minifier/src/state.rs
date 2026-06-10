@@ -1,6 +1,7 @@
 use oxc_ecmascript::constant_evaluation::ConstantValue;
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use oxc_allocator::{Allocator, BitSet};
 use oxc_data_structures::stack::NonEmptyStack;
 use oxc_semantic::Scoping;
 use oxc_span::SourceType;
@@ -8,6 +9,51 @@ use oxc_str::Str;
 use oxc_syntax::symbol::SymbolId;
 
 use crate::{CompressOptions, symbol_value::SymbolValues};
+
+/// Per-pass dirty data accumulated by walking-helper calls. Consumed by
+/// `exit_program`; reset at the next `enter_program` via [`Self::init`].
+pub struct PassDirty<'a> {
+    /// `ReferenceId`s whose AST node has been removed and not re-installed
+    /// in any later mutation this pass.
+    ///
+    /// Arena-allocated bitset sized to the program's `references_len()` at
+    /// `enter_program`. A `BitSet` (rather than an `FxHashSet`) keeps the
+    /// per-ident cost on the `DropDiff` hot path to a direct array store
+    /// instead of a hash + heap insert.
+    ///
+    /// References minted MID-pass (fresh idents from substitutions) have
+    /// indices beyond the bitset's capacity; the mark path in `DropDiff`
+    /// skips them, and the retain guard in
+    /// `Scoping::retain_resolved_references_excluding` treats
+    /// `idx >= capacity` as live.
+    pub(crate) dead_refs: BitSet<'a>,
+
+    /// At least one direct `eval(...)` call was dropped this pass. Gates
+    /// the small `LiveDirectEvalCollector` walk at `exit_program`.
+    pub(crate) eval_dropped: bool,
+}
+
+impl<'a> PassDirty<'a> {
+    pub fn new(allocator: &'a Allocator) -> Self {
+        Self {
+            // Empty bitset; replaced with a properly-sized one at `enter_program`.
+            dead_refs: BitSet::new_in(0, allocator),
+            eval_dropped: false,
+        }
+    }
+
+    /// Re-allocate `dead_refs` sized to the program's current
+    /// `references_len()`, and reset all other accumulator fields.
+    ///
+    /// Called at every `enter_program`. The prior bitset is dropped; the
+    /// arena reclaims its memory at program end. We re-allocate (rather
+    /// than `clear()`) because `references_len()` can grow between passes
+    /// as helpers mint fresh references.
+    pub fn init(&mut self, references_len: usize, allocator: &'a Allocator) {
+        self.dead_refs = BitSet::new_in(references_len, allocator);
+        self.eval_dropped = false;
+    }
+}
 
 pub struct MinifierState<'a> {
     pub source_type: SourceType,
@@ -32,21 +78,26 @@ pub struct MinifierState<'a> {
 
     /// Set when a typed helper mutates the AST. Private by design: the only
     /// writers are the helpers on `MinifierTraverseCtx`; the only reader is
-    /// the fixed-point loop driver via `take_mutated()` (plus the transitional
-    /// `was_mutated()` collector gate).
+    /// the fixed-point loop driver via `take_mutated()`.
     mutated: bool,
+
+    /// Per-pass dirty accumulator populated by `replace_*` / `drop_*` helpers
+    /// as subtrees are removed. Consumed by `exit_program` in one batch to
+    /// drive the incremental scoping refresh.
+    pub(crate) dirty: PassDirty<'a>,
 
     /// Scratch buffer reused by `try_fold_concat` to build template literal
     /// quasis without allocating a fresh `String` per call.
     pub concat_scratch: String,
 }
 
-impl MinifierState<'_> {
+impl<'a> MinifierState<'a> {
     pub fn new(
         source_type: SourceType,
         options: CompressOptions,
         dce: bool,
         scoping: &Scoping,
+        allocator: &'a Allocator,
     ) -> Self {
         Self {
             source_type,
@@ -57,6 +108,7 @@ impl MinifierState<'_> {
             class_symbols_stack: ClassSymbolsStack::new(),
             proto_write_symbols: FxHashSet::default(),
             mutated: false,
+            dirty: PassDirty::new(allocator),
             concat_scratch: String::new(),
         }
     }
@@ -71,13 +123,6 @@ impl MinifierState<'_> {
     /// Record that a typed helper mutated the AST.
     pub(crate) fn record_mutation(&mut self) {
         self.mutated = true;
-    }
-
-    /// Non-consuming read of the mutation signal.
-    ///
-    /// Transitional: removed in the incremental-scoping PR together with the collector gate.
-    pub(crate) fn was_mutated(&self) -> bool {
-        self.mutated
     }
 }
 

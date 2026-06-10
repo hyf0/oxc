@@ -987,8 +987,9 @@ impl<'a> PeepholeOptimizations {
                     || decl.init.as_ref().is_some_and(|init| init.may_have_side_effects(ctx));
                 if !should_keep && let Some(init) = &decl.init {
                     // Same leak hazard as `remove_unused_variable_declaration`:
-                    // the `retain` silently drops the declarator + init, so
-                    // record the drop of the init explicitly.
+                    // the `retain` silently drops the declarator + init, so the
+                    // init's refs need an explicit `drop_expression` to reach
+                    // `PassDirty`.
                     ctx.drop_expression(init);
                 }
                 should_keep

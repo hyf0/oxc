@@ -243,8 +243,9 @@ impl<'a> PeepholeOptimizations {
                 if el.may_have_side_effects(ctx) {
                     return true;
                 }
-                // The spread is being elided without a slot-replacement
-                // helper, so record the drop of its argument explicitly.
+                // The spread is being elided — walk its argument so any
+                // identifier refs inside are marked dead in `PassDirty`
+                // and don't leak across passes.
                 let ArrayExpressionElement::SpreadElement(spread) = el else { unreachable!() };
                 ctx.drop_expression(&spread.argument);
                 false
@@ -448,7 +449,7 @@ impl<'a> PeepholeOptimizations {
                     if Self::remove_unused_expression(&mut value, ctx) {
                         // Same rationale as the key branch above — the property
                         // value is being dropped without a `replace_*` helper,
-                        // so record the drop explicitly.
+                        // so its references must be walked into `dirty.dead_refs`.
                         ctx.drop_expression(&value);
                     } else {
                         transformed_elements.push(value);

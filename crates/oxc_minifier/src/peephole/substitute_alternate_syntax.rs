@@ -478,7 +478,7 @@ impl<'a> PeepholeOptimizations {
         left: &Expression<'a>,
         right: &Expression<'a>,
         span: Span,
-        ctx: &TraverseCtx<'a>,
+        ctx: &mut TraverseCtx<'a>,
         inversed: bool,
     ) -> Option<Expression<'a>> {
         let pair = Self::commutative_pair(
@@ -546,18 +546,41 @@ impl<'a> PeepholeOptimizations {
             return None;
         }
 
+        // The replacement must not alias `ReferenceId`s from the dropped subtree:
+        // `replace_expression` walks the old tree and marks its references dead,
+        // so a reused id would be pruned from scoping while still live in the
+        // program. Mint fresh references (same name, same resolution) instead.
+        let typeof_symbol_id =
+            ctx.scoping().get_reference(typeof_id_ref.reference_id()).symbol_id();
+        let is_null_symbol_id =
+            ctx.scoping().get_reference(is_null_id_ref.reference_id()).symbol_id();
+
         let mut new_left_expr = typeof_binary_expr.clone_in_with_semantic_ids(ctx.ast.allocator);
         if let Expression::BinaryExpression(new_left_expr_binary) = &mut new_left_expr {
             new_left_expr_binary.operator =
                 if inversed { BinaryOperator::Inequality } else { BinaryOperator::Equality };
+            // `clone_in_with_semantic_ids` copied the old `typeof` operand's
+            // `ReferenceId` into the clone — replace it with a fresh reference.
+            let fresh_reference_id =
+                ctx.create_reference(typeof_id_ref.name, typeof_symbol_id, ReferenceFlags::Read);
+            let BinaryExpression { left, right, .. } = &mut **new_left_expr_binary;
+            for operand in [left, right] {
+                if let Expression::UnaryExpression(unary) = operand
+                    && unary.operator == UnaryOperator::Typeof
+                    && let Expression::Identifier(id) = &mut unary.argument
+                {
+                    id.reference_id.set(Some(fresh_reference_id));
+                }
+            }
         } else {
             unreachable!();
         }
 
-        let is_null_id_ref = ctx.ast.expression_identifier_with_reference_id(
+        let is_null_id_ref = ctx.create_ident_expr(
             is_null_id_ref.span,
             is_null_id_ref.name,
-            is_null_id_ref.reference_id(),
+            is_null_symbol_id,
+            ReferenceFlags::Read,
         );
 
         let new_right_expr = if inversed {
