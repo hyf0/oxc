@@ -103,6 +103,10 @@ impl<'a> Compressor<'a> {
         ctx: &mut ReusableTraverseCtx<'a>,
     ) -> u8 {
         let mut iteration = 0u8;
+        // Boundary for the under-prune debug guard: references with indices
+        // beyond this are minted during the loop and legally exempt.
+        #[cfg(debug_assertions)]
+        let initial_references_len = ctx.get_mut().scoping().references_len();
         // Consume the drops Normalize recorded (`void x` -> `void 0`,
         // drop_console), so pass 1 already observes the pruned reference
         // counts and Normalize's drops cost no extra peephole pass.
@@ -130,6 +134,12 @@ impl<'a> Compressor<'a> {
             }
             iteration += 1;
         }
+        #[cfg(debug_assertions)]
+        PeepholeOptimizations::debug_assert_no_under_prune(
+            program,
+            ctx.get_mut(),
+            initial_references_len,
+        );
         iteration
     }
 }

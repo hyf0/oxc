@@ -162,7 +162,7 @@ impl<'a> PeepholeOptimizations {
     }
 
     /// Debug-only guard for the incremental scoping refresh: every reference
-    /// marked dead in `dead_refs` (see `PassDirty::dead_refs`) must really
+    /// marked dead in `dead_refs` (see [`crate::PassDirty::dead_refs`]) must really
     /// be gone from the live program — pruning a still-live reference is the
     /// unsafe direction that produces incorrect output.
     ///
@@ -188,6 +188,58 @@ impl<'a> PeepholeOptimizations {
             }
         }
         OverPruneCheck { dead_refs }.visit_program(program);
+    }
+
+    /// Debug-only converse of [`Self::debug_assert_no_over_prune`], run once
+    /// by the `Compressor` driver after the fixed-point loop: every reference
+    /// that existed when the loop began and is still in a symbol's
+    /// resolved-references list must appear in the live program. A violation
+    /// means a site discarded a subtree without routing it through a
+    /// `drop_*` / `replace_*` helper (the leak direction: stale references
+    /// silently block optimizations), or the caller passed a `scoping`
+    /// already inconsistent with `program` (see the precondition on
+    /// `Compressor::build_with_scoping`).
+    ///
+    /// References minted during the loop (`idx >= initial_references_len`)
+    /// are exempt: the capacity guard deliberately leaves a same-pass
+    /// mint-then-drop unmarked (see `PassDirty::dead_refs`).
+    ///
+    /// Together with the over-prune guard this closes both failure
+    /// directions of the drop-helper convention across the whole unit-test
+    /// and conformance corpus, at zero release cost.
+    #[cfg(debug_assertions)]
+    pub(crate) fn debug_assert_no_under_prune(
+        program: &Program<'a>,
+        ctx: &TraverseCtx<'a>,
+        initial_references_len: usize,
+    ) {
+        struct LiveRefCollector<'b, 'c> {
+            live: &'b mut BitSet<'c>,
+        }
+        impl<'a> Visit<'a> for LiveRefCollector<'_, '_> {
+            fn visit_identifier_reference(&mut self, it: &IdentifierReference<'a>) {
+                if let Some(reference_id) = it.reference_id.get() {
+                    let idx = reference_id.index();
+                    if idx < self.live.capacity() {
+                        self.live.set_bit(idx);
+                    }
+                }
+            }
+        }
+        let mut live = BitSet::new_in(initial_references_len, ctx.ast.allocator);
+        LiveRefCollector { live: &mut live }.visit_program(program);
+        for reference_ids in ctx.scoping().resolved_references() {
+            for reference_id in reference_ids {
+                let idx = reference_id.index();
+                assert!(
+                    idx >= initial_references_len || live.has_bit(idx),
+                    "incremental scoping under-prune: reference {idx} is still in a symbol's \
+                     resolved-references list but its node is gone from the program — a drop \
+                     site bypassed the `drop_*` / `replace_*` helpers, or the caller passed a \
+                     `scoping` inconsistent with `program`",
+                );
+            }
+        }
     }
 
     /// Consume the `PassDirty` accumulator: batch-prune the dead resolved

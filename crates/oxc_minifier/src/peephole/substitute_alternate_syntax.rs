@@ -980,14 +980,22 @@ impl<'a> PeepholeOptimizations {
 
             let new_decl =
                 ctx.ast.variable_declarator(SPAN, var_init.kind, r_id_pat, NONE, Some(arr), false);
+            // The old declarators (`e`, `a`, and `r`'s original init) are
+            // replaced wholesale — walk them so refs inside (e.g. `e` in
+            // `Array(e > 1 ? e - 1 : 0)`) reach `PassDirty`. The moved-out
+            // `r` binding and `arguments` ident left id-less dummies behind.
+            for decl in &var_init.declarations {
+                ctx.drop_variable_declarator(decl);
+            }
             var_init.declarations = ctx.ast.vec1(new_decl);
         } else {
             // `for (var; 0;)` with an empty `VariableDeclaration` is invalid JS when printed and
             // makes `try_fold_for` hoist a bogus `var;`. Use `for (; 0;)` instead so dead-code
-            // folding becomes an empty statement.
-            // `for_stmt.init` is `Option<ForStatementInit>` — no typed helper for that
-            // enum slot yet. The `replace_statement` for `for_stmt.body`
-            // below records a mutation, covering this drop's mutation signal.
+            // folding becomes an empty statement. Walk the dropped
+            // declarators so their refs reach `PassDirty`.
+            for decl in &var_init.declarations {
+                ctx.drop_variable_declarator(decl);
+            }
             for_stmt.init = None;
         }
         if let Some(old) = for_stmt.test.take() {
