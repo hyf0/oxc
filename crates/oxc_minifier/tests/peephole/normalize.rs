@@ -34,10 +34,11 @@ fn test_void_ident() {
     test("void x", "x"); // reference error
 }
 
-// Leak regression: Normalize runs before the peephole fixed-point loop, so
-// references it drops never reach the per-pass `PassDirty` accumulator and
-// must be deleted from scoping directly. A leaked read makes `x` look
-// referenced, blocking unused-declaration removal.
+// Leak regression: Normalize runs before the peephole fixed-point loop, but
+// `PassDirty` is live from `MinifierState::new`, so Normalize's typed-helper
+// drops are recorded like any pass's and consumed by the driver's pre-loop
+// `flush_pass_dirty`. A leaked read makes `x` look referenced, blocking
+// unused-declaration removal.
 #[test]
 fn test_void_ident_does_not_leak_reference() {
     let options = CompressOptions::smallest();

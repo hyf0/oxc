@@ -55,8 +55,8 @@ impl<'a> PeepholeOptimizations {
                 // The element is being silently dropped from the vector. Walk
                 // its subtree so identifier references inside (e.g. a method
                 // body) are recorded in `PassDirty::dead_refs` and pruned by
-                // `exit_program`. Without this, refs leak across passes and
-                // break idempotency. `drop_class_element` also records a
+                // `flush_pass_dirty`. Without this, refs leak across passes
+                // and break idempotency. `drop_class_element` also records a
                 // mutation for the fixed-point loop driver.
                 ctx.drop_class_element(element);
             }

@@ -54,8 +54,9 @@ impl<'alloc> BitSet<'alloc> {
     }
 
     /// Bounds-safe membership test: returns `true` if `bit` is within
-    /// capacity AND set. Unlike [`Self::has_bit`], positions at or beyond
-    /// [`Self::capacity`] return `false` instead of panicking.
+    /// capacity AND set. Positions at or beyond [`Self::capacity`] return
+    /// `false`, whereas [`Self::has_bit`] may panic or read unspecified
+    /// trailing-bit state for such positions.
     #[inline]
     pub fn contains(&self, bit: usize) -> bool {
         bit < self.max_bit_count && self.has_bit(bit)
