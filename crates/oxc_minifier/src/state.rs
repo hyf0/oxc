@@ -72,8 +72,9 @@ pub struct MinifierState<'a> {
     mutated: bool,
 
     /// Per-pass dirty accumulator populated by `replace_*` / `drop_*` helpers
-    /// as subtrees are removed. Consumed by `exit_program` in one batch to
-    /// drive the incremental scoping refresh.
+    /// as subtrees are removed. Consumed by `flush_pass_dirty` in the
+    /// `Compressor` driver (pre-loop and after each mutated pass) to drive
+    /// the incremental scoping refresh.
     pub(crate) dirty: PassDirty<'a>,
 
     /// Scratch buffer reused by `try_fold_concat` to build template literal

@@ -238,8 +238,9 @@ impl<'a> Normalize {
             return;
         }
         // `replace_expression` walks the dropped ident into `PassDirty`, so
-        // its resolved reference is pruned at the first `exit_program` —
-        // otherwise the symbol would look referenced forever.
+        // its resolved reference is pruned by the driver's pre-loop
+        // `flush_pass_dirty`, before pass 1 — otherwise the symbol would
+        // look referenced forever.
         let new_arg =
             ctx.ast.expression_numeric_literal(ident.span, 0.0, None, NumberBase::Decimal);
         ctx.replace_expression(&mut e.argument, new_arg);

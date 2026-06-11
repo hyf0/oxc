@@ -35,8 +35,10 @@ impl<'a> Compressor<'a> {
     /// mutated `program` after building `scoping` must reflect those edits in
     /// `scoping`. Stale *extra* references cause missed optimizations (output stays
     /// correct); an *added* reference that was never recorded can cause incorrect
-    /// output. In-repo callers either rebuild a fresh `Scoping` immediately before
-    /// calling this, or update `scoping` as they mutate (e.g. `ReplaceGlobalDefines`).
+    /// output. In-repo callers satisfy this by rebuilding a fresh `Scoping`
+    /// immediately before calling this — e.g. `crates/oxc/src/compiler.rs`
+    /// rebuilds scoping before compress/DCE whenever `ReplaceGlobalDefines`
+    /// reports a change.
     pub fn build_with_scoping(
         self,
         program: &mut Program<'a>,

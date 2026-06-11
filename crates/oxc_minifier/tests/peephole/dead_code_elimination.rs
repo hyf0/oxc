@@ -207,9 +207,10 @@ fn dce_var_hoisting() {
 }
 
 // Dropping a dead-after-throw statement (`module.exports = x`) removes the
-// only reference to `x`. Without flagging that as a change, the peephole loop
-// terminates before `LiveUsageCollector` refreshes scoping, leaving the
-// unused-declarator pass to see a stale reference and keep `var x = {}`.
+// only reference to `x`. Without recording that as a mutation, the peephole
+// loop terminates before `flush_pass_dirty` prunes the dropped reference,
+// leaving the unused-declarator pass to see a stale reference and keep
+// `var x = {}`.
 #[test]
 fn dead_after_throw_drop_triggers_unused_declarator_removal() {
     test(
