@@ -20,6 +20,78 @@ fn remove_unused_declarator_walks_type_annotation_refs() {
     );
 }
 
+// Leak regression (single-use inlining, `stmts.pop()` site): after the lone
+// declarator's init is inlined into the next statement, the whole declaration
+// statement is popped — the discarded declarator's type annotation still holds
+// a ref to `a`.
+#[test]
+fn single_use_inline_pop_walks_type_annotation_refs() {
+    let options = CompressOptions::smallest();
+    test_options_source_type(
+        "function f() { const a = Symbol('a'); const x: { [a]: string } = g(); return x; } h(f());",
+        "function f() { return g(); } h(f());",
+        SourceType::ts(),
+        &options,
+    );
+}
+
+// Leak regression (single-use inlining, `declarations.truncate()` site): only
+// the tail declarator `x` is inlined; the truncate discards it while `keep`
+// survives — `x`'s type annotation still holds a ref to `a`.
+#[test]
+fn single_use_inline_truncate_walks_type_annotation_refs() {
+    let options = CompressOptions::smallest();
+    test_options_source_type(
+        "function f() { const a = Symbol('a'); const keep = g(), x: { [a]: string } = h(); return [keep, keep, x]; } j(f());",
+        "function f() { let keep = g(); return [keep, keep, h()]; } j(f());",
+        SourceType::ts(),
+        &options,
+    );
+}
+
+// Leak regression (single-use inlining, `declarations.drain()` site): `x` is
+// inlined into the sibling declarator `y`'s init within the same declaration;
+// the drain discards `x`'s declarator — its type annotation still holds a ref
+// to `a`.
+#[test]
+fn single_use_inline_drain_walks_type_annotation_refs() {
+    let options = CompressOptions::smallest();
+    test_options_source_type(
+        "function f() { const a = Symbol('a'); const x: { [a]: string } = g(), y = [x]; return y; } j(f());",
+        "function f() { return [g()]; } j(f());",
+        SourceType::ts(),
+        &options,
+    );
+}
+
+// Leak regression (dead-code identity-drop site): an init-less `var` after
+// `return` is classified as an identity drop (KeepVar re-emits it), skipping
+// the drop walk — but KeepVar's re-emit strips the type annotation, so the
+// annotation's ref to `b` leaks.
+#[test]
+fn dead_code_identity_drop_checks_type_annotation() {
+    let options = CompressOptions::smallest();
+    test_options_source_type(
+        "function f() { const b = Symbol('b'); return 1; var a: { [b]: string }; } g(f());",
+        "function f() { return 1; } g(f());",
+        SourceType::ts(),
+        &options,
+    );
+}
+
+// Near-miss: dropping the annotated declarator must only kill the annotation's
+// own ref — `a`'s other (value) uses keep `const a = Symbol('a')` alive.
+#[test]
+fn type_annotation_drop_keeps_symbol_used_elsewhere() {
+    let options = CompressOptions::smallest();
+    test_options_source_type(
+        "function f() { const a = Symbol('a'); const x: { [a]: string } = g(); return [x, a, a]; } h(f());",
+        "function f() { let a = Symbol('a'); return [g(), a, a]; } h(f());",
+        SourceType::ts(),
+        &options,
+    );
+}
+
 #[test]
 fn remove_unused_variable_declaration() {
     let options = CompressOptions::smallest();

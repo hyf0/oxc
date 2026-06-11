@@ -19,9 +19,14 @@ use super::PeepholeOptimizations;
 /// with no initializers, which `KeepVar` re-emits unchanged at the end of
 /// the block. Flagging such an identity drop as a real change would
 /// oscillate the peephole fixed-point loop forever.
+///
+/// A TS type annotation disqualifies the identity classification: `KeepVar`'s
+/// re-emit strips annotations, and an annotation can hold resolved references
+/// (computed keys in a type literal) that must go through the drop walk.
 fn dead_drop_mutates_ast(stmt: &Statement<'_>) -> bool {
     !matches!(stmt, Statement::VariableDeclaration(decl)
-        if decl.kind.is_var() && decl.declarations.iter().all(|d| d.init.is_none()))
+        if decl.kind.is_var()
+            && decl.declarations.iter().all(|d| d.init.is_none() && d.type_annotation.is_none()))
 }
 
 impl<'a> PeepholeOptimizations {
@@ -1258,12 +1263,19 @@ impl<'a> PeepholeOptimizations {
                 ctx,
                 non_scoped_literal_only,
             );
+            // The inlined declarators' inits were already taken out by the
+            // substitution, but the discarded declarators themselves still
+            // need a drop walk — their TS type annotations can hold resolved
+            // references (computed keys in a type literal).
             if new_len == 0 {
                 inlined = true;
-                stmts.pop();
+                let dropped = stmts.pop().unwrap();
+                ctx.drop_statement(&dropped);
             } else if old_len != new_len {
                 inlined = true;
-                prev_var_decl.declarations.truncate(new_len);
+                for decl in prev_var_decl.declarations.drain(new_len..) {
+                    ctx.drop_variable_declarator(&decl);
+                }
                 break;
             } else {
                 break;
@@ -1299,7 +1311,11 @@ impl<'a> PeepholeOptimizations {
             if old_len != new_len {
                 changed = true;
                 let drop_count = old_len - new_len;
-                declarations.drain(i - drop_count..i);
+                // Same drop-walk requirement as the truncate above: the
+                // drained declarators' type annotations can hold references.
+                for decl in declarations.drain(i - drop_count..i) {
+                    ctx.drop_variable_declarator(&decl);
+                }
                 i -= drop_count;
             }
             i += 1;
@@ -1307,7 +1323,14 @@ impl<'a> PeepholeOptimizations {
         changed
     }
 
-    /// Returns new length
+    /// Returns new length.
+    ///
+    /// CONTRACT: the consumed suffix `declarators[new_len..]` is the caller's
+    /// to discard, and the caller must route each discarded declarator through
+    /// `ctx.drop_variable_declarator` (or an enclosing `drop_statement`) — the
+    /// inlined inits are already taken out, but binding patterns and TS type
+    /// annotations can still hold resolved references that would otherwise
+    /// leak past the incremental scoping refresh.
     fn substitute_single_use_symbol_in_expression_from_declarators(
         target_expr: &mut Expression<'a>,
         declarators: &mut [VariableDeclarator<'a>],
