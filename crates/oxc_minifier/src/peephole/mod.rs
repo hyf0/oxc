@@ -162,7 +162,7 @@ impl<'a> PeepholeOptimizations {
     }
 
     /// Debug-only guard for the incremental scoping refresh: every reference
-    /// marked dead in `dead_refs` (see [`crate::PassDirty::dead_refs`]) must really
+    /// marked dead in `dead_refs` (see [`crate::state::PassDirty::dead_refs`]) must really
     /// be gone from the live program — pruning a still-live reference is the
     /// unsafe direction that produces incorrect output.
     ///
