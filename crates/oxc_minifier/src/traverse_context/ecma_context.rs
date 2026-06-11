@@ -461,4 +461,15 @@ impl<'a> TraverseCtx<'a, MinifierState<'a>> {
         self.dirty_diff().walk_old_class_element(element);
         self.state.record_mutation();
     }
+
+    /// Mark a variable declarator as about to be dropped. Walks the whole
+    /// declarator — binding pattern, TS type annotation (which can contain
+    /// references, e.g. computed keys in a type literal), and init if still
+    /// attached. Same contract as `drop_expression`. If the init is kept
+    /// alive elsewhere, `take()` it out of the declarator before calling this.
+    #[inline]
+    pub fn drop_variable_declarator(&mut self, decl: &VariableDeclarator<'a>) {
+        self.dirty_diff().walk_old_variable_declarator(decl);
+        self.state.record_mutation();
+    }
 }

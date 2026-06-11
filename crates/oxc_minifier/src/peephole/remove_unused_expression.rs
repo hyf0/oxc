@@ -333,7 +333,12 @@ impl<'a> PeepholeOptimizations {
         for mut e in temp_lit.expressions.drain(..) {
             if e.to_primitive(ctx).is_symbol() != Some(false) {
                 pending_to_string_required_exprs.push(e);
-            } else if !Self::remove_unused_expression(&mut e, ctx) {
+            } else if Self::remove_unused_expression(&mut e, ctx) {
+                // The element collapsed to nothing and is dropped right here
+                // by the `drain` — walk it so refs inside reach `PassDirty`
+                // instead of leaking.
+                ctx.drop_expression(&e);
+            } else {
                 if !pending_to_string_required_exprs.is_empty() {
                     // flush pending to string required expressions
                     let expressions =

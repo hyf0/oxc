@@ -75,13 +75,12 @@ impl<'a> PeepholeOptimizations {
         }
         var_decl.declarations.retain_mut(|decl| {
             if Self::should_remove_unused_declarator(decl, ctx) {
-                // Mark refs in the discarded init as dead so the per-pass
+                // Mark refs in the discarded declarator (init AND the
+                // binding's TS type annotation) as dead so the per-pass
                 // scoping refresh removes them. The `retain_mut` predicate
                 // silently drops the declarator, so we lose the chance to
                 // walk it via `replace_*`.
-                if let Some(init) = &decl.init {
-                    ctx.drop_expression(init);
-                }
+                ctx.drop_variable_declarator(decl);
                 false
             } else {
                 true
