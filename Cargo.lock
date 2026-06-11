@@ -2213,6 +2213,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxc_formatter_css"
+version = "0.54.0"
+dependencies = [
+ "cow-utils",
+ "oxc_allocator",
+ "oxc_diagnostics",
+ "oxc_formatter_core",
+ "oxc_span",
+ "pico-args",
+ "raffia",
+]
+
+[[package]]
 name = "oxc_formatter_graphql"
 version = "0.54.0"
 dependencies = [
@@ -2545,6 +2558,7 @@ dependencies = [
  "oxc_ast_visit",
  "oxc_formatter",
  "oxc_formatter_core",
+ "oxc_formatter_css",
  "oxc_formatter_graphql",
  "oxc_formatter_json",
  "oxc_parser",
@@ -3174,6 +3188,27 @@ name = "r-efi"
 version = "6.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
+
+[[package]]
+name = "raffia"
+version = "0.12.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a589c5611a5f7713bf0c13e949c4c791a359ff517a9f27552475b470e8873229"
+dependencies = [
+ "raffia_macro",
+ "smallvec",
+]
+
+[[package]]
+name = "raffia_macro"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8ac21f5e4bc6b29ea5d5e691a9aa08b2b9fd8891f48a99157b9f02d8a48e1318"
+dependencies = [
+ "heck",
+ "quote",
+ "syn",
+]
 
 [[package]]
 name = "rand"
