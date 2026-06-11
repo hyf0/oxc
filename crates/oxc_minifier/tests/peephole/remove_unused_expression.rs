@@ -175,19 +175,22 @@ fn test_template_literal_drop_walks_removed_element_refs() {
 // `drop_expression` so identifier references inside don't leak across
 // passes (#22736).
 //
-// In the current `MayHaveSideEffects` rules every spread shape that retains
-// identifier references (e.g. `[...ident]`, `[...`${ident}`]`) is treated
-// as side-effecting and so the leak does not trigger on existing source
-// inputs — the dropped-spread branch is reached for nested array literals
-// whose contents are all themselves side-effect-free, e.g.
-// `[...[function(){}]]`. The recursive element walk inside the inner array
-// already routes through `drop_expression`, so the explicit walk added
-// here is a defensive fix mirroring `remove_unused_object_expr`. Output
-// stays identical; conformance is the live discriminator.
+// The spread argument is an array literal with two holes, so
+// `try_flatten_array_expression_elements` (gated at < 2 holes) does not
+// flatten it and the spread reaches the elision branch with `p`'s
+// references still inside; `p` is multi-use so single-use inlining can't
+// paper over the leak. Without the drop walk the stale reads keep `let p`
+// alive and panic the under-prune debug guard.
 #[test]
 fn test_array_spread_drop_walks_argument_refs() {
     test("([...[function(){}]])", "");
     test("([4, ...[function(){}], a])", "a");
+    let options = CompressOptions::smallest();
+    test_options(
+        "function f() { let p = 'metric'; [...[p, , , p]]; return 1; } g(f());",
+        "function f() { return 1; } g(f());",
+        &options,
+    );
 }
 
 #[test]
