@@ -155,6 +155,21 @@ fn test_array_literal_containing_spread() {
     test_same("([...b, ...c])"); // It would also be fine if the spreads were split apart.
 }
 
+// Leak regression: `remove_unused_template_literal` drains the template's
+// elements; an element that `remove_unused_expression` reports removable was
+// silently discarded without a `drop_expression` walk, leaking its refs.
+// Two computed keys keep `p` multi-use so single-use inlining can't paper
+// over the leak; the stale reads then block unused-declaration removal.
+#[test]
+fn test_template_literal_drop_walks_removed_element_refs() {
+    let options = CompressOptions::smallest();
+    test_options(
+        "function f() { let p = 'metric'; let t = { [`${p}_x`]: 0, [`${p}_y`]: 0 }; void t; return 1; } g(f());",
+        "function f() { return 1; } g(f());",
+        &options,
+    );
+}
+
 // Regression: when `remove_unused_array_expr` elides a side-effect-free
 // `SpreadElement`, the argument subtree must be walked through
 // `drop_expression` so identifier references inside don't leak across

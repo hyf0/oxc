@@ -5,6 +5,21 @@ use crate::{
     test_same_options_source_type, test_same_smallest, test_smallest,
 };
 
+// Leak regression: dropping an unused declarator must walk the whole
+// declarator, not just the init — references can also live in the binding's
+// TS type annotation (e.g. computed keys in a type literal). A leaked type
+// ref makes the symbol look used, blocking its own removal.
+#[test]
+fn remove_unused_declarator_walks_type_annotation_refs() {
+    let options = CompressOptions::smallest();
+    test_options_source_type(
+        "function f() { const a = Symbol('a'); const b = Symbol('b'); const reg: { [a]: string; [b]: string } = { foo: 1, bar: 2 }; return 1; } g(f());",
+        "function f() { return 1; } g(f());",
+        SourceType::ts(),
+        &options,
+    );
+}
+
 #[test]
 fn remove_unused_variable_declaration() {
     let options = CompressOptions::smallest();

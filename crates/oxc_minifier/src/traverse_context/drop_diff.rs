@@ -61,6 +61,15 @@ impl<'a, 's> DropDiff<'a, 's> {
         self.visit_class_element(element);
         self
     }
+
+    /// Walks the whole declarator — binding pattern, TS type annotation, and
+    /// init. Type annotations can contain references (e.g. computed keys in a
+    /// type literal: `const r: { [sym]: string } = ...`), so walking only the
+    /// init leaks them.
+    pub(crate) fn walk_old_variable_declarator(mut self, decl: &VariableDeclarator<'a>) -> Self {
+        self.visit_variable_declarator(decl);
+        self
+    }
 }
 
 impl<'a> Visit<'a> for DropDiff<'a, '_> {

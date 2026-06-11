@@ -194,23 +194,21 @@ impl<'a> PeepholeOptimizations {
         }
         OverPruneCheck { dead_refs }.visit_program(program);
     }
-}
 
-impl<'a> Traverse<'a> for PeepholeOptimizations {
-    fn enter_program(&mut self, _program: &mut Program<'a>, ctx: &mut TraverseCtx<'a>) {
-        ctx.state.symbol_values.reset();
-        ctx.state.proto_write_symbols.clear();
-        // (Re-)allocate `dead_refs` sized to current `references_len()`.
-        // `references_len` can grow between passes as helpers mint fresh refs,
-        // so we allocate a new bitset each pass rather than `clear()`-ing.
-        // Arena reclaims the prior allocation at program end.
-        let refs_len = ctx.scoping().references_len();
-        ctx.state.dirty.init(refs_len, ctx.ast.allocator);
-    }
-
-    fn exit_program(&mut self, program: &mut Program<'a>, ctx: &mut TraverseCtx<'a>) {
+    /// Consume the `PassDirty` accumulator: batch-prune the dead resolved
+    /// references from scoping, refresh direct-eval flags if an `eval(...)`
+    /// call was dropped, and re-initialize the accumulator (re-sized, since
+    /// `references_len` can grow as helpers mint fresh refs; re-allocated
+    /// rather than `clear()`-ed — the arena reclaims the prior bitset at
+    /// program end).
+    ///
+    /// Called from two places: `Normalize::exit_program` — so the fixed-point
+    /// loop starts against already-pruned scoping and Normalize's drops cost
+    /// no extra peephole pass — and `PeepholeOptimizations::exit_program`
+    /// after every pass.
+    pub(crate) fn flush_pass_dirty(program: &Program<'a>, ctx: &mut TraverseCtx<'a>) {
         // (1) Resolved references — direct consumption, no walk.
-        //     Per-pass dirty data is built by `replace_*` / `drop_*` helpers as
+        //     Dirty data is built by `replace_*` / `drop_*` helpers as
         //     subtrees are removed and is consumed here in one batch.
         if !ctx.state.dirty.dead_refs.is_empty() {
             // Debug-only guard: every reference we are about to prune must
@@ -232,6 +230,25 @@ impl<'a> Traverse<'a> for PeepholeOptimizations {
             let scopes = live.scopes;
             Self::refresh_direct_eval_flags(ctx.scoping_mut(), &scopes);
         }
+
+        // (3) Re-initialize the consumed accumulator for the next pass.
+        let refs_len = ctx.scoping().references_len();
+        ctx.state.dirty.init(refs_len, ctx.ast.allocator);
+    }
+}
+
+impl<'a> Traverse<'a> for PeepholeOptimizations {
+    fn enter_program(&mut self, _program: &mut Program<'a>, ctx: &mut TraverseCtx<'a>) {
+        ctx.state.symbol_values.reset();
+        ctx.state.proto_write_symbols.clear();
+        // `PassDirty` is deliberately NOT reset here: it is allocated at
+        // `MinifierState::new` and re-initialized by `flush_pass_dirty`,
+        // which runs at the end of `Normalize::exit_program` and of this
+        // pass's `exit_program`.
+    }
+
+    fn exit_program(&mut self, program: &mut Program<'a>, ctx: &mut TraverseCtx<'a>) {
+        Self::flush_pass_dirty(program, ctx);
 
         // Only check class_symbols_stack in full optimization mode (not DCE mode)
         debug_assert!(ctx.state.dce || ctx.state.class_symbols_stack.is_exhausted());

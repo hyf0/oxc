@@ -474,13 +474,10 @@ impl<'a> PeepholeOptimizations {
         let VariableDeclaration { span, kind, declarations, declare, .. } = var_decl.unbox();
         for mut decl in declarations {
             if Self::should_remove_unused_declarator(&decl, ctx) {
-                // The whole `VariableDeclarator` is dropped here — including its
-                // `BindingPattern` `id`. There is no typed helper for
-                // `VariableDeclarator` / `BindingPattern` yet, so we keep
-                // `notice_change()` as the drop marker for the declarator.
-                ctx.notice_change();
                 // `init` is `mut` because `remove_unused_expression` rewrites
-                // it in place (peeling pure-call wrappers, etc).
+                // it in place (peeling pure-call wrappers, etc). It is taken
+                // out first because it may survive as an expression statement
+                // — the declarator walk below must not mark its refs dead.
                 if let Some(mut init) = decl.init.take() {
                     if Self::remove_unused_expression(&mut init, ctx) {
                         ctx.drop_expression(&init);
@@ -488,6 +485,10 @@ impl<'a> PeepholeOptimizations {
                         result.push(ctx.ast.statement_expression(init.span(), init));
                     }
                 }
+                // Walk the rest of the dropped declarator (binding pattern +
+                // TS type annotation, which can contain references). Also
+                // records the mutation for the fixed-point loop driver.
+                ctx.drop_variable_declarator(&decl);
             } else {
                 if let Some(Statement::VariableDeclaration(prev_var_decl)) = result.last_mut()
                     && kind == prev_var_decl.kind
@@ -985,12 +986,12 @@ impl<'a> PeepholeOptimizations {
             var_decl.declarations.retain_mut(|decl| {
                 let should_keep = !Self::should_remove_unused_declarator(decl, ctx)
                     || decl.init.as_ref().is_some_and(|init| init.may_have_side_effects(ctx));
-                if !should_keep && let Some(init) = &decl.init {
+                if !should_keep {
                     // Same leak hazard as `remove_unused_variable_declaration`:
-                    // the `retain` silently drops the declarator + init, so the
-                    // init's refs need an explicit `drop_expression` to reach
-                    // `PassDirty`.
-                    ctx.drop_expression(init);
+                    // the `retain` silently drops the declarator, so its refs
+                    // (init and TS type annotation) need an explicit walk to
+                    // reach `PassDirty`.
+                    ctx.drop_variable_declarator(decl);
                 }
                 should_keep
             });

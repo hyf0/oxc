@@ -48,18 +48,30 @@ impl<'a> Normalize {
 }
 
 impl<'a> Traverse<'a> for Normalize {
-    fn exit_program(&mut self, node: &mut Program<'a>, _ctx: &mut TraverseCtx<'a>) {
+    fn exit_program(&mut self, node: &mut Program<'a>, ctx: &mut TraverseCtx<'a>) {
         if self.options.remove_unnecessary_use_strict && node.source_type.is_module() {
             node.directives.drain_filter(|d| d.directive.as_str() == "use strict");
         }
+        // Consume the drops recorded above (`void x` -> `void 0`,
+        // drop_console) before the fixed-point loop starts, so pass 1 already
+        // observes the pruned reference counts and Normalize's drops cost no
+        // extra peephole pass.
+        super::PeepholeOptimizations::flush_pass_dirty(node, ctx);
     }
 
     fn exit_statements(&mut self, stmts: &mut Vec<'a, Statement<'a>>, ctx: &mut TraverseCtx<'a>) {
         stmts.retain(|stmt| match stmt {
             Statement::EmptyStatement(_) => false,
             Statement::DebuggerStatement(_) if ctx.state.options.drop_debugger => false,
-            Statement::ExpressionStatement(expr) if ctx.state.options.drop_console => {
-                !Self::is_console_expression(&expr.expression)
+            Statement::ExpressionStatement(expr)
+                if ctx.state.options.drop_console
+                    && Self::is_console_expression(&expr.expression) =>
+            {
+                // The dropped call's argument subtrees may contain resolved
+                // references — record them in `PassDirty` so the first
+                // `exit_program` prunes them.
+                ctx.drop_expression(&expr.expression);
+                false
             }
             _ => true,
         });
@@ -88,6 +100,17 @@ impl<'a> Traverse<'a> for Normalize {
         if let Expression::ParenthesizedExpression(paren_expr) = expr {
             *expr = paren_expr.expression.take_in(ctx.ast);
         }
+        // Handled outside the match below so the replacement can go through
+        // `ctx.replace_expression`, which walks the dropped call (its
+        // argument subtrees may contain resolved references) into `PassDirty`.
+        if ctx.state.options.drop_console
+            && let Expression::CallExpression(call_expr) = &*expr
+            && Self::is_console_call_expression(call_expr)
+        {
+            let new_expr = ctx.ast.void_0(call_expr.span);
+            ctx.replace_expression(expr, new_expr);
+            return;
+        }
         if let Some(e) = match expr {
             Expression::Identifier(ident) => Self::try_compress_identifier(ident, ctx),
             Expression::UnaryExpression(e) if e.operator.is_void() => {
@@ -97,12 +120,6 @@ impl<'a> Traverse<'a> for Normalize {
             Expression::ArrowFunctionExpression(e) => {
                 Self::recover_arrow_expression_after_drop_console(e, ctx);
                 None
-            }
-            Expression::CallExpression(call_expr)
-                if ctx.state.options.drop_console
-                    && Self::is_console_call_expression(call_expr) =>
-            {
-                Some(ctx.ast.void_0(call_expr.span))
             }
             Expression::StaticMemberExpression(e) => Self::fold_number_nan_to_nan(e, ctx),
             _ => None,
@@ -244,13 +261,18 @@ impl<'a> Normalize {
         false
     }
 
-    fn fold_void_ident(e: &mut UnaryExpression<'a>, ctx: &TraverseCtx<'a>) {
+    fn fold_void_ident(e: &mut UnaryExpression<'a>, ctx: &mut TraverseCtx<'a>) {
         debug_assert!(e.operator.is_void());
         let Expression::Identifier(ident) = &e.argument else { return };
         if ident.is_global_reference(ctx.scoping()) {
             return;
         }
-        e.argument = ctx.ast.expression_numeric_literal(ident.span, 0.0, None, NumberBase::Decimal);
+        // `replace_expression` walks the dropped ident into `PassDirty`, so
+        // its resolved reference is pruned at the first `exit_program` —
+        // otherwise the symbol would look referenced forever.
+        let new_arg =
+            ctx.ast.expression_numeric_literal(ident.span, 0.0, None, NumberBase::Decimal);
+        ctx.replace_expression(&mut e.argument, new_arg);
     }
 
     fn fold_number_nan_to_nan(

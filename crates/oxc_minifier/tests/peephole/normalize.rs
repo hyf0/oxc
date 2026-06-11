@@ -34,6 +34,16 @@ fn test_void_ident() {
     test("void x", "x"); // reference error
 }
 
+// Leak regression: Normalize runs before the peephole fixed-point loop, so
+// references it drops never reach the per-pass `PassDirty` accumulator and
+// must be deleted from scoping directly. A leaked read makes `x` look
+// referenced, blocking unused-declaration removal.
+#[test]
+fn test_void_ident_does_not_leak_reference() {
+    let options = CompressOptions::smallest();
+    test_options("let x = 1; void x; console.log(2);", "console.log(2);", &options);
+}
+
 #[test]
 fn parens() {
     test("(((x)))", "x");
@@ -50,6 +60,18 @@ fn drop_console() {
         "(() => { try { return } catch {} })()",
         &options,
     );
+}
+
+// Same leak class as `test_void_ident_does_not_leak_reference`: dropped
+// `console.*` calls (statement position and expression position) contain
+// argument subtrees whose resolved references must be deleted from scoping.
+#[test]
+fn drop_console_does_not_leak_references() {
+    let options = CompressOptions { drop_console: true, ..CompressOptions::smallest() };
+    // Statement position.
+    test_options("let x = 1; console.log(x); foo(2);", "foo(2);", &options);
+    // Expression position: the call is replaced with `void 0`.
+    test_options("let x = 1; foo(console.log(x));", "foo(void 0);", &options);
 }
 
 #[test]
