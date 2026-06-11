@@ -242,6 +242,67 @@ impl<'a> PeepholeOptimizations {
         }
     }
 
+    /// Debug-only guard for the gated direct-eval refresh: every live direct
+    /// `eval(...)` call must already have `ScopeFlags::DirectEval` on its
+    /// reference's recorded scope and every ancestor (the exact postcondition
+    /// of [`Self::refresh_direct_eval_flags`]). The gate
+    /// (`PassDirty::eval_dropped`) only re-derives flags when an eval call is
+    /// *dropped*, so it is sound only while no pass *forms* a new direct eval
+    /// call (e.g. by moving `eval` into callee position). Stale-SET flags are
+    /// merely conservative and not checked; only the missing direction is
+    /// unsafe.
+    ///
+    /// Locally-bound `eval` callees are exempt: `remove_sequence_expression`
+    /// deliberately forms them (`var eval; (0, eval)()` -> `var eval; eval()`
+    /// — `should_keep_indirect_access` only protects the *global* `eval`),
+    /// banking on a local binding named `eval` not holding the real `eval`.
+    /// Under that same assumption the missing flag is inert; a later refresh
+    /// may still set it (the name-based collector), which is the allowed
+    /// conservative direction.
+    ///
+    /// Allocation-free by design: asserts inline per call during the walk so
+    /// the allocation-tracking task (debug assertions on) sees no sys-allocs.
+    /// The walk itself is skipped when the program has no unresolved `eval`
+    /// at all: the check only fires on unresolved (global) callees, and every
+    /// live unresolved reference's name is a key in
+    /// `root_unresolved_references` (populated at build, appended on in-loop
+    /// mints, deliberately never pruned in-loop) — a conservative superset
+    /// that can never skip a checkable call.
+    #[cfg(debug_assertions)]
+    fn debug_assert_no_stale_direct_eval(program: &Program<'a>, scoping: &Scoping) {
+        struct DirectEvalFlagCheck<'s> {
+            scoping: &'s Scoping,
+        }
+        impl<'a> Visit<'a> for DirectEvalFlagCheck<'_> {
+            fn visit_call_expression(&mut self, it: &CallExpression<'a>) {
+                if let Some(ident) = as_direct_eval_call(it)
+                    && let Some(reference_id) = ident.reference_id.get()
+                {
+                    let reference = self.scoping.get_reference(reference_id);
+                    // No symbol = unresolved = the global `eval` (see above).
+                    if reference.symbol_id().is_none() {
+                        // Same scope derivation as `LiveDirectEvalCollector` —
+                        // producer, consumer, and this check must agree.
+                        for scope_id in self.scoping.scope_ancestors(reference.scope_id()) {
+                            assert!(
+                                self.scoping.scope_flags(scope_id).contains_direct_eval(),
+                                "stale direct-eval flags: scope {scope_id:?} is missing \
+                                 `ScopeFlags::DirectEval` for a live direct `eval(...)` call — a \
+                                 pass formed a new direct eval call without dropping one — see \
+                                 `PassDirty::eval_dropped`",
+                            );
+                        }
+                    }
+                }
+                walk_call_expression(self, it);
+            }
+        }
+        if !scoping.root_unresolved_references().contains_key("eval") {
+            return;
+        }
+        DirectEvalFlagCheck { scoping }.visit_program(program);
+    }
+
     /// Consume the `PassDirty` accumulator: batch-prune the dead resolved
     /// references from scoping, refresh direct-eval flags if an `eval(...)`
     /// call was dropped, and re-initialize the accumulator.
@@ -276,6 +337,10 @@ impl<'a> PeepholeOptimizations {
             let scopes = live.scopes;
             Self::refresh_direct_eval_flags(ctx.scoping_mut(), &scopes);
         }
+        // Debug-only converse of the gate: no pass may have FORMED a new
+        // direct eval call without dropping one (see the helper).
+        #[cfg(debug_assertions)]
+        Self::debug_assert_no_stale_direct_eval(program, ctx.scoping());
 
         // (3) Reset the accumulator for the next pass. `references_len` only
         //     grows (helpers mint, never delete, references), so the bitset
