@@ -104,10 +104,6 @@ impl<'a> Traverse<'a> for Normalize {
                 Self::fold_void_ident(e, ctx);
                 None
             }
-            Expression::ArrowFunctionExpression(e) => {
-                Self::recover_arrow_expression_after_drop_console(e, ctx);
-                None
-            }
             Expression::StaticMemberExpression(e) => Self::fold_number_nan_to_nan(e, ctx),
             _ => None,
         } {
@@ -133,15 +129,6 @@ impl<'a> Traverse<'a> for Normalize {
 impl<'a> Normalize {
     pub fn new(options: NormalizeOptions) -> Self {
         Self { options }
-    }
-
-    fn recover_arrow_expression_after_drop_console(
-        expr: &mut ArrowFunctionExpression<'a>,
-        ctx: &TraverseCtx<'a>,
-    ) {
-        if ctx.state.options.drop_console && expr.expression && expr.body.is_empty() {
-            expr.expression = false;
-        }
     }
 
     fn is_console_call_expression(call_expr: &CallExpression<'_>) -> bool {

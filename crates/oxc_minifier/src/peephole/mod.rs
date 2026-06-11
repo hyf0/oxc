@@ -25,10 +25,13 @@ use oxc_syntax::{
 };
 use rustc_hash::FxHashSet;
 
-use oxc_allocator::Vec;
+use oxc_allocator::{BitSet, Vec};
 use oxc_ast::ast::*;
 
-use crate::{ReusableTraverseCtx, Traverse, TraverseCtx, minifier_traverse::traverse_mut_with_ctx};
+use crate::{
+    ReusableTraverseCtx, Traverse, TraverseCtx, minifier_traverse::traverse_mut_with_ctx,
+    traverse_context::as_direct_eval_call,
+};
 
 pub use self::normalize::{Normalize, NormalizeOptions};
 
@@ -158,24 +161,16 @@ impl<'a> PeepholeOptimizations {
         }
     }
 
-    /// Debug-only guard for the incremental scoping refresh.
+    /// Debug-only guard for the incremental scoping refresh: every reference
+    /// marked dead in `dead_refs` (see `PassDirty::dead_refs`) must really
+    /// be gone from the live program — pruning a still-live reference is the
+    /// unsafe direction that produces incorrect output.
     ///
-    /// Every `ReferenceId` whose bit is set in `dead_refs` is about to be
-    /// removed from each symbol's resolved-reference list by
-    /// `retain_resolved_references_excluding`. Such a reference MUST no longer
-    /// appear anywhere in the live program — otherwise a still-live reference
-    /// is being pruned, leaving a symbol looking under-referenced so a later
-    /// pass can wrongly drop it (the unsafe direction that produces incorrect
-    /// output).
-    ///
-    /// This walks the live program once per dirty pass in debug builds only, so
-    /// the entire unit-test and `cargo coverage -- minifier` corpus doubles as
-    /// an over-prune detector at zero release cost. Resolved references only;
-    /// unresolved references are not tracked. Allocates nothing: each live
-    /// reference is checked against `dead_refs` directly.
+    /// Walks the live program once per dirty pass in debug builds only, so
+    /// the entire unit-test and `cargo coverage -- minifier` corpus doubles
+    /// as an over-prune detector at zero release cost.
     #[cfg(debug_assertions)]
-    fn debug_assert_no_over_prune(program: &Program<'a>, dead_refs: &oxc_allocator::BitSet<'_>) {
-        use oxc_allocator::BitSet;
+    fn debug_assert_no_over_prune(program: &Program<'a>, dead_refs: &BitSet<'_>) {
         struct OverPruneCheck<'b, 'c> {
             dead_refs: &'b BitSet<'c>,
         }
@@ -204,10 +199,12 @@ impl<'a> PeepholeOptimizations {
     /// Normalize's drops cost no extra peephole pass) and after every
     /// peephole pass.
     pub(crate) fn flush_pass_dirty(program: &Program<'a>, ctx: &mut TraverseCtx<'a>) {
+        let had_dead = !ctx.state.dirty.dead_refs.is_empty();
+
         // (1) Resolved references — direct consumption, no walk.
         //     Dirty data is built by `replace_*` / `drop_*` helpers as
         //     subtrees are removed and is consumed here in one batch.
-        if !ctx.state.dirty.dead_refs.is_empty() {
+        if had_dead {
             // Debug-only guard: every reference we are about to prune must
             // really be gone from the live program (see the helper).
             #[cfg(debug_assertions)]
@@ -228,19 +225,20 @@ impl<'a> PeepholeOptimizations {
             Self::refresh_direct_eval_flags(ctx.scoping_mut(), &scopes);
         }
 
-        // (3) Re-initialize the accumulator for the next pass, re-sized
-        //     because `references_len` grows as helpers mint fresh refs
-        //     (re-allocated rather than cleared; the arena reclaims the old
-        //     bitset at program end). Skipped when nothing was consumed and
-        //     nothing was minted — the bitset is still all-zero and
-        //     correctly sized.
+        // (3) Reset the accumulator for the next pass. `references_len` only
+        //     grows (helpers mint, never delete, references), so the bitset
+        //     is re-allocated only when refs were minted this pass; otherwise
+        //     a memset reuses the warm allocation (a bump arena never
+        //     reclaims the old one).
         let refs_len = ctx.scoping().references_len();
-        if !ctx.state.dirty.dead_refs.is_empty() || ctx.state.dirty.dead_refs.capacity() != refs_len
-        {
-            ctx.state.dirty = crate::state::PassDirty::new(refs_len, ctx.ast.allocator);
+        if ctx.state.dirty.dead_refs.capacity() == refs_len {
+            if had_dead {
+                ctx.state.dirty.dead_refs.clear();
+            }
         } else {
-            ctx.state.dirty.eval_dropped = false;
+            ctx.state.dirty.dead_refs = BitSet::new_in(refs_len, ctx.ast.allocator);
         }
+        ctx.state.dirty.eval_dropped = false;
     }
 }
 
@@ -650,7 +648,7 @@ impl<'s> LiveDirectEvalCollector<'s> {
 
 impl<'a> Visit<'a> for LiveDirectEvalCollector<'_> {
     fn visit_call_expression(&mut self, it: &CallExpression<'a>) {
-        if let Some(ident) = crate::traverse_context::as_direct_eval_call(it)
+        if let Some(ident) = as_direct_eval_call(it)
             && let Some(reference_id) = ident.reference_id.get()
         {
             let scope_id = self.scoping.get_reference(reference_id).scope_id();

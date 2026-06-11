@@ -113,10 +113,13 @@ impl<'a> Compressor<'a> {
         ctx.state_mut().take_mutated();
         loop {
             PeepholeOptimizations.run_once(program, ctx);
-            PeepholeOptimizations::flush_pass_dirty(program, ctx.get_mut());
+            // A pass with no recorded mutation cannot have recorded drops
+            // (every drop helper also records a mutation), so the terminal
+            // iteration skips the flush.
             if !ctx.state_mut().take_mutated() {
                 break;
             }
+            PeepholeOptimizations::flush_pass_dirty(program, ctx.get_mut());
             if let Some(max) = max_iterations {
                 if iteration >= max {
                     break;
