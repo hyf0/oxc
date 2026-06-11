@@ -10,49 +10,38 @@ use oxc_syntax::symbol::SymbolId;
 
 use crate::{CompressOptions, symbol_value::SymbolValues};
 
-/// Dirty data accumulated by walking-helper calls between two consumption
-/// points. Live from `MinifierState::new` so the pre-loop `Normalize` pass
-/// can record drops through the same typed helpers as the peephole loop;
-/// consumed and re-initialized by `PeepholeOptimizations::exit_program`
-/// after every pass.
+/// Dirty data accumulated by the `replace_*` / `drop_*` helper calls between
+/// two consumption points. Live from `MinifierState::new` so the pre-loop
+/// `Normalize` pass records drops through the same typed helpers as the
+/// peephole loop; consumed and re-initialized by `flush_pass_dirty` in the
+/// `Compressor` driver after `Normalize` and after every peephole pass.
 pub struct PassDirty<'a> {
     /// `ReferenceId`s whose AST node has been removed and not re-installed
     /// in any later mutation this pass.
     ///
     /// Arena-allocated bitset sized to the program's `references_len()` at
-    /// construction / the end of the previous pass. A `BitSet` (rather than
-    /// an `FxHashSet`) keeps the per-ident cost on the `DropDiff` hot path
-    /// to a direct array store instead of a hash + heap insert.
+    /// construction / the previous flush. A `BitSet` (rather than an
+    /// `FxHashSet`) keeps the per-ident cost on the `DropDiff` hot path to
+    /// a direct array store instead of a hash + heap insert.
     ///
-    /// References minted MID-pass (fresh idents from substitutions) have
-    /// indices beyond the bitset's capacity; the mark path in `DropDiff`
-    /// skips them, and the retain guard in
-    /// `Scoping::retain_resolved_references_excluding` treats
-    /// `idx >= capacity` as live. (`Normalize` mints no references, so a
-    /// capacity taken at construction is exact for the first pass.)
+    /// INVARIANT (the "capacity guard", relied on by `DropDiff`,
+    /// `Scoping::retain_resolved_references_excluding`, and the over-prune
+    /// debug assert): references minted MID-pass have indices beyond the
+    /// bitset's capacity and are treated as live everywhere — never marked,
+    /// never excluded. Conservative: such a reference stays in its symbol's
+    /// list until callers rebuild scoping (a missed optimization, never a
+    /// correctness issue). `Normalize` mints no references, so a capacity
+    /// taken at construction is exact for the first pass.
     pub(crate) dead_refs: BitSet<'a>,
 
     /// At least one direct `eval(...)` call was dropped this pass. Gates
-    /// the small `LiveDirectEvalCollector` walk at `exit_program`.
+    /// the small `LiveDirectEvalCollector` walk at flush time.
     pub(crate) eval_dropped: bool,
 }
 
 impl<'a> PassDirty<'a> {
     pub fn new(references_len: usize, allocator: &'a Allocator) -> Self {
         Self { dead_refs: BitSet::new_in(references_len, allocator), eval_dropped: false }
-    }
-
-    /// Re-allocate `dead_refs` sized to the program's current
-    /// `references_len()`, and reset all other accumulator fields.
-    ///
-    /// Called by `exit_program` immediately after the accumulated marks are
-    /// consumed. The prior bitset is dropped; the arena reclaims its memory
-    /// at program end. We re-allocate (rather than `clear()`) because
-    /// `references_len()` can grow between passes as helpers mint fresh
-    /// references.
-    pub fn init(&mut self, references_len: usize, allocator: &'a Allocator) {
-        self.dead_refs = BitSet::new_in(references_len, allocator);
-        self.eval_dropped = false;
     }
 }
 

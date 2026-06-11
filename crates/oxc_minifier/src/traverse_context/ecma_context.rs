@@ -19,7 +19,9 @@ use crate::{
     symbol_value::SymbolValue,
 };
 
-use super::{DropDiff, TraverseCtx};
+use oxc_ast_visit::Visit;
+
+use super::{TraverseCtx, drop_diff::DropDiff};
 
 pub fn is_exact_int64(num: f64) -> bool {
     num.fract() == 0.0
@@ -362,13 +364,11 @@ impl<'a> TraverseCtx<'a, MinifierState<'a>> {
         (options.class && is_class) || (options.function && !is_class)
     }
 
-    /// Construct a `DropDiff` borrowing the per-pass dirty accumulator and
-    /// the current scoping snapshot. Used by walking helpers.
+    /// Construct a `DropDiff` borrowing the per-pass dirty accumulator.
+    /// Used by the `replace_*` / `drop_*` helpers.
     #[inline]
     fn dirty_diff(&mut self) -> DropDiff<'a, '_> {
-        // Field-level borrowing: state and scoping are disjoint fields of self.
-        let TraverseCtx { state, scoping, .. } = self;
-        DropDiff::new(&mut state.dirty, scoping.scoping())
+        DropDiff::new(&mut self.state.dirty)
     }
 
     /// Replace an expression slot. Marks the pass as having mutated the AST.
@@ -378,7 +378,7 @@ impl<'a> TraverseCtx<'a, MinifierState<'a>> {
     /// are the only way to record the mutation (compiler-enforced).
     #[inline]
     pub fn replace_expression(&mut self, slot: &mut Expression<'a>, new: Expression<'a>) {
-        self.dirty_diff().walk_old_expression(slot);
+        self.dirty_diff().visit_expression(slot);
         *slot = new;
         self.state.record_mutation();
     }
@@ -386,7 +386,7 @@ impl<'a> TraverseCtx<'a, MinifierState<'a>> {
     /// Replace a statement slot. Marks the pass as having mutated the AST.
     #[inline]
     pub fn replace_statement(&mut self, slot: &mut Statement<'a>, new: Statement<'a>) {
-        self.dirty_diff().walk_old_statement(slot);
+        self.dirty_diff().visit_statement(slot);
         *slot = new;
         self.state.record_mutation();
     }
@@ -398,7 +398,7 @@ impl<'a> TraverseCtx<'a, MinifierState<'a>> {
         slot: &mut AssignmentTargetProperty<'a>,
         new: AssignmentTargetProperty<'a>,
     ) {
-        self.dirty_diff().walk_old_assignment_target_property(slot);
+        self.dirty_diff().visit_assignment_target_property(slot);
         *slot = new;
         self.state.record_mutation();
     }
@@ -406,7 +406,7 @@ impl<'a> TraverseCtx<'a, MinifierState<'a>> {
     /// Replace a property-key slot. Marks the pass as having mutated the AST.
     #[inline]
     pub fn replace_property_key(&mut self, slot: &mut PropertyKey<'a>, new: PropertyKey<'a>) {
-        self.dirty_diff().walk_old_property_key(slot);
+        self.dirty_diff().visit_property_key(slot);
         *slot = new;
         self.state.record_mutation();
     }
@@ -419,7 +419,7 @@ impl<'a> TraverseCtx<'a, MinifierState<'a>> {
         slot: &mut ForStatementLeft<'a>,
         new: ForStatementLeft<'a>,
     ) {
-        self.dirty_diff().walk_old_for_statement_left(slot);
+        self.dirty_diff().visit_for_statement_left(slot);
         *slot = new;
         self.state.record_mutation();
     }
@@ -442,7 +442,7 @@ impl<'a> TraverseCtx<'a, MinifierState<'a>> {
     /// predicate, before `field = None`, after `vec.pop()`).
     #[inline]
     pub fn drop_expression(&mut self, expr: &Expression<'a>) {
-        self.dirty_diff().walk_old_expression(expr);
+        self.dirty_diff().visit_expression(expr);
         self.state.record_mutation();
     }
 
@@ -450,7 +450,7 @@ impl<'a> TraverseCtx<'a, MinifierState<'a>> {
     /// `drop_expression`.
     #[inline]
     pub fn drop_statement(&mut self, stmt: &Statement<'a>) {
-        self.dirty_diff().walk_old_statement(stmt);
+        self.dirty_diff().visit_statement(stmt);
         self.state.record_mutation();
     }
 
@@ -458,7 +458,7 @@ impl<'a> TraverseCtx<'a, MinifierState<'a>> {
     /// `drop_expression`.
     #[inline]
     pub fn drop_class_element(&mut self, element: &ClassElement<'a>) {
-        self.dirty_diff().walk_old_class_element(element);
+        self.dirty_diff().visit_class_element(element);
         self.state.record_mutation();
     }
 
@@ -469,7 +469,7 @@ impl<'a> TraverseCtx<'a, MinifierState<'a>> {
     /// alive elsewhere, `take()` it out of the declarator before calling this.
     #[inline]
     pub fn drop_variable_declarator(&mut self, decl: &VariableDeclarator<'a>) {
-        self.dirty_diff().walk_old_variable_declarator(decl);
+        self.dirty_diff().visit_variable_declarator(decl);
         self.state.record_mutation();
     }
 }

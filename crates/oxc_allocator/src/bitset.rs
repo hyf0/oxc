@@ -53,6 +53,14 @@ impl<'alloc> BitSet<'alloc> {
         self.entries.iter().all(|word| *word == 0)
     }
 
+    /// Bounds-safe membership test: returns `true` if `bit` is within
+    /// capacity AND set. Unlike [`Self::has_bit`], positions at or beyond
+    /// [`Self::capacity`] return `false` instead of panicking.
+    #[inline]
+    pub fn contains(&self, bit: usize) -> bool {
+        bit < self.max_bit_count && self.has_bit(bit)
+    }
+
     /// Returns `true` if the bit at the given position is set.
     #[inline]
     pub fn has_bit(&self, bit: usize) -> bool {
@@ -364,5 +372,13 @@ mod tests {
         let bs0 = BitSet::new_in(0, &allocator);
         assert_eq!(bs0.capacity(), 0);
         assert!(bs0.is_empty());
+        assert!(!bs0.contains(0));
+
+        // `contains` is bounds-safe: out-of-range is `false`, not a panic.
+        bs.set_bit(100);
+        assert!(bs.contains(100));
+        assert!(!bs.contains(99));
+        assert!(!bs.contains(128));
+        assert!(!bs.contains(usize::MAX));
     }
 }

@@ -555,12 +555,13 @@ impl<'a> PeepholeOptimizations {
         let is_null_symbol_id =
             ctx.scoping().get_reference(is_null_id_ref.reference_id()).symbol_id();
 
-        let mut new_left_expr = typeof_binary_expr.clone_in_with_semantic_ids(ctx.ast.allocator);
+        // Plain `clone_in` resets every `reference_id` to `None`, making id
+        // aliasing structurally impossible; the loop below installs the one
+        // fresh reference the clone needs.
+        let mut new_left_expr = typeof_binary_expr.clone_in(ctx.ast.allocator);
         if let Expression::BinaryExpression(new_left_expr_binary) = &mut new_left_expr {
             new_left_expr_binary.operator =
                 if inversed { BinaryOperator::Inequality } else { BinaryOperator::Equality };
-            // `clone_in_with_semantic_ids` copied the old `typeof` operand's
-            // `ReferenceId` into the clone — replace it with a fresh reference.
             let fresh_reference_id =
                 ctx.create_reference(typeof_id_ref.name, typeof_symbol_id, ReferenceFlags::Read);
             let BinaryExpression { left, right, .. } = &mut **new_left_expr_binary;

@@ -48,31 +48,18 @@ impl<'a> Normalize {
 }
 
 impl<'a> Traverse<'a> for Normalize {
-    fn exit_program(&mut self, node: &mut Program<'a>, ctx: &mut TraverseCtx<'a>) {
+    fn exit_program(&mut self, node: &mut Program<'a>, _ctx: &mut TraverseCtx<'a>) {
         if self.options.remove_unnecessary_use_strict && node.source_type.is_module() {
             node.directives.drain_filter(|d| d.directive.as_str() == "use strict");
         }
-        // Consume the drops recorded above (`void x` -> `void 0`,
-        // drop_console) before the fixed-point loop starts, so pass 1 already
-        // observes the pruned reference counts and Normalize's drops cost no
-        // extra peephole pass.
-        super::PeepholeOptimizations::flush_pass_dirty(node, ctx);
     }
 
     fn exit_statements(&mut self, stmts: &mut Vec<'a, Statement<'a>>, ctx: &mut TraverseCtx<'a>) {
+        // No console handling here: `exit_expression` has already rewritten
+        // every console call (statement position included) to `void 0`.
         stmts.retain(|stmt| match stmt {
             Statement::EmptyStatement(_) => false,
             Statement::DebuggerStatement(_) if ctx.state.options.drop_debugger => false,
-            Statement::ExpressionStatement(expr)
-                if ctx.state.options.drop_console
-                    && Self::is_console_expression(&expr.expression) =>
-            {
-                // The dropped call's argument subtrees may contain resolved
-                // references — record them in `PassDirty` so the first
-                // `exit_program` prunes them.
-                ctx.drop_expression(&expr.expression);
-                false
-            }
             _ => true,
         });
     }
@@ -155,10 +142,6 @@ impl<'a> Normalize {
         if ctx.state.options.drop_console && expr.expression && expr.body.is_empty() {
             expr.expression = false;
         }
-    }
-
-    fn is_console_expression(expr: &Expression<'_>) -> bool {
-        matches!(expr, Expression::CallExpression(call_expr) if Self::is_console_call_expression(call_expr))
     }
 
     fn is_console_call_expression(call_expr: &CallExpression<'_>) -> bool {
