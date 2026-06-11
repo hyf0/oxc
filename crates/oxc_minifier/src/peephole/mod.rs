@@ -175,18 +175,18 @@ impl<'a> PeepholeOptimizations {
     /// reference is checked against `dead_refs` directly.
     #[cfg(debug_assertions)]
     fn debug_assert_no_over_prune(program: &Program<'a>, dead_refs: &oxc_allocator::BitSet<'_>) {
+        use oxc_allocator::BitSet;
         struct OverPruneCheck<'b, 'c> {
-            dead_refs: &'b oxc_allocator::BitSet<'c>,
+            dead_refs: &'b BitSet<'c>,
         }
         impl<'a> Visit<'a> for OverPruneCheck<'_, '_> {
             fn visit_identifier_reference(&mut self, it: &IdentifierReference<'a>) {
                 let Some(reference_id) = it.reference_id.get() else { return };
                 let idx = reference_id.index();
-                // Refs minted mid-pass have `idx >= capacity` and are never in
-                // `dead_refs`; this mirrors the guard in
-                // `retain_resolved_references_excluding`.
+                // `contains` is false past capacity — the capacity guard
+                // (see `PassDirty::dead_refs`).
                 assert!(
-                    idx >= self.dead_refs.capacity() || !self.dead_refs.has_bit(idx),
+                    !self.dead_refs.contains(idx),
                     "incremental scoping over-prune: reference {idx} is marked dead but still \
                      appears in the live program",
                 );
@@ -197,15 +197,12 @@ impl<'a> PeepholeOptimizations {
 
     /// Consume the `PassDirty` accumulator: batch-prune the dead resolved
     /// references from scoping, refresh direct-eval flags if an `eval(...)`
-    /// call was dropped, and re-initialize the accumulator (re-sized, since
-    /// `references_len` can grow as helpers mint fresh refs; re-allocated
-    /// rather than `clear()`-ed — the arena reclaims the prior bitset at
-    /// program end).
+    /// call was dropped, and re-initialize the accumulator.
     ///
-    /// Called from two places: `Normalize::exit_program` — so the fixed-point
-    /// loop starts against already-pruned scoping and Normalize's drops cost
-    /// no extra peephole pass — and `PeepholeOptimizations::exit_program`
-    /// after every pass.
+    /// The `Compressor` driver calls this after `Normalize` (so the
+    /// fixed-point loop starts against already-pruned scoping and
+    /// Normalize's drops cost no extra peephole pass) and after every
+    /// peephole pass.
     pub(crate) fn flush_pass_dirty(program: &Program<'a>, ctx: &mut TraverseCtx<'a>) {
         // (1) Resolved references — direct consumption, no walk.
         //     Dirty data is built by `replace_*` / `drop_*` helpers as
@@ -231,9 +228,19 @@ impl<'a> PeepholeOptimizations {
             Self::refresh_direct_eval_flags(ctx.scoping_mut(), &scopes);
         }
 
-        // (3) Re-initialize the consumed accumulator for the next pass.
+        // (3) Re-initialize the accumulator for the next pass, re-sized
+        //     because `references_len` grows as helpers mint fresh refs
+        //     (re-allocated rather than cleared; the arena reclaims the old
+        //     bitset at program end). Skipped when nothing was consumed and
+        //     nothing was minted — the bitset is still all-zero and
+        //     correctly sized.
         let refs_len = ctx.scoping().references_len();
-        ctx.state.dirty.init(refs_len, ctx.ast.allocator);
+        if !ctx.state.dirty.dead_refs.is_empty() || ctx.state.dirty.dead_refs.capacity() != refs_len
+        {
+            ctx.state.dirty = crate::state::PassDirty::new(refs_len, ctx.ast.allocator);
+        } else {
+            ctx.state.dirty.eval_dropped = false;
+        }
     }
 }
 
@@ -241,15 +248,11 @@ impl<'a> Traverse<'a> for PeepholeOptimizations {
     fn enter_program(&mut self, _program: &mut Program<'a>, ctx: &mut TraverseCtx<'a>) {
         ctx.state.symbol_values.reset();
         ctx.state.proto_write_symbols.clear();
-        // `PassDirty` is deliberately NOT reset here: it is allocated at
-        // `MinifierState::new` and re-initialized by `flush_pass_dirty`,
-        // which runs at the end of `Normalize::exit_program` and of this
-        // pass's `exit_program`.
+        // `PassDirty` is managed by the `Compressor` driver via
+        // `flush_pass_dirty`, not reset per traversal.
     }
 
-    fn exit_program(&mut self, program: &mut Program<'a>, ctx: &mut TraverseCtx<'a>) {
-        Self::flush_pass_dirty(program, ctx);
-
+    fn exit_program(&mut self, _program: &mut Program<'a>, ctx: &mut TraverseCtx<'a>) {
         // Only check class_symbols_stack in full optimization mode (not DCE mode)
         debug_assert!(ctx.state.dce || ctx.state.class_symbols_stack.is_exhausted());
     }
@@ -632,8 +635,8 @@ impl<'a> Traverse<'a> for PeepholeOptimizations {
 }
 
 /// Walks the live program to find scopes containing direct `eval(...)` calls.
-/// Used by `exit_program` only when at least one direct eval call was dropped
-/// this pass (gated via `PassDirty::eval_dropped`).
+/// Used by `flush_pass_dirty` only when at least one direct eval call was
+/// dropped this pass (gated via `PassDirty::eval_dropped`).
 struct LiveDirectEvalCollector<'s> {
     scoping: &'s Scoping,
     scopes: FxHashSet<ScopeId>,
@@ -647,9 +650,7 @@ impl<'s> LiveDirectEvalCollector<'s> {
 
 impl<'a> Visit<'a> for LiveDirectEvalCollector<'_> {
     fn visit_call_expression(&mut self, it: &CallExpression<'a>) {
-        if !it.optional
-            && let Some(ident) = it.callee.get_identifier_reference()
-            && ident.name == "eval"
+        if let Some(ident) = crate::traverse_context::as_direct_eval_call(it)
             && let Some(reference_id) = ident.reference_id.get()
         {
             let scope_id = self.scoping.get_reference(reference_id).scope_id();

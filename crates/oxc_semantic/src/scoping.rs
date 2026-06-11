@@ -606,18 +606,14 @@ impl Scoping {
     /// `excluded` should be sized to at least [`Self::references_len`] at the
     /// time it was constructed. References created after the bitset was
     /// constructed have indices beyond `excluded.capacity()` and are treated
-    /// as live (never excluded).
+    /// as live (never excluded) — `BitSet::contains` is `false` past capacity.
     pub fn retain_resolved_references_excluding(&mut self, excluded: &BitSet<'_>) {
         if excluded.is_empty() {
             return;
         }
-        let capacity = excluded.capacity();
         self.cell.with_dependent_mut(|_allocator, cell| {
             for reference_ids in &mut cell.resolved_references {
-                reference_ids.retain(|id| {
-                    let idx = id.index();
-                    idx >= capacity || !excluded.has_bit(idx)
-                });
+                reference_ids.retain(|id| !excluded.contains(id.index()));
             }
         });
     }

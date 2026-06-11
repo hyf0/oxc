@@ -103,14 +103,17 @@ impl<'a> Compressor<'a> {
         ctx: &mut ReusableTraverseCtx<'a>,
     ) -> u8 {
         let mut iteration = 0u8;
-        // Start the fixed-point loop from a clean signal. Normalize records
-        // mutations through the typed helpers, but its drops are already
-        // flushed by `Normalize::exit_program` — pass 1 observes the pruned
-        // reference counts directly, so a Normalize-only mutation must not
-        // force a pointless extra iteration.
+        // Consume the drops Normalize recorded (`void x` -> `void 0`,
+        // drop_console), so pass 1 already observes the pruned reference
+        // counts and Normalize's drops cost no extra peephole pass.
+        PeepholeOptimizations::flush_pass_dirty(program, ctx.get_mut());
+        // Start the loop from a clean signal: Normalize's drops are flushed
+        // above, so a Normalize-only mutation must not force a pointless
+        // extra iteration.
         ctx.state_mut().take_mutated();
         loop {
             PeepholeOptimizations.run_once(program, ctx);
+            PeepholeOptimizations::flush_pass_dirty(program, ctx.get_mut());
             if !ctx.state_mut().take_mutated() {
                 break;
             }
