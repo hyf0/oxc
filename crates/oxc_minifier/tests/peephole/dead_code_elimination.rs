@@ -674,3 +674,14 @@ fn fold_coalesce_on_tracked_non_nullish_binding() {
         "let n = 5n; export function a() { return n } export function b() { return n }",
     );
 }
+
+// Convergence regression (monitor-oxc, bluebird.js): `try_fold_if` re-extracts
+// the dead branch's `var` names via `KeepVar` on every pass and filters the
+// synthesized statement through the unused-declarator removal. Dropping `x`
+// from that TRANSIENT statement must not record a mutation — when the slot is
+// already in canonical KeepVar shape nothing in the live tree changes, and a
+// spurious mutation spins the fixed-point loop past its iteration guard.
+#[test]
+fn test_fold_if_keep_var_filter_converges() {
+    test_same("function f() {\n\tif (0) var x, y;\n\ty = 1;\n\treturn y;\n}\nf();");
+}
