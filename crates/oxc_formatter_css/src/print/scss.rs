@@ -123,7 +123,8 @@ pub fn write_top_level_value<'a>(
             .iter_before(value_span.end)
             .any(|c| c.span.start >= value_span.start);
         let force_hard_line = !ctx.decl_prop.is_some_and(|p| p.starts_with("--"))
-            && (groups.iter().any(|g| g.len() > 1) || has_comments);
+            && (groups.iter().enumerate().any(|(i, g)| value::comma_group_is_multi(g, i == 0))
+                || has_comments);
         value::write_value_groups(&groups, ctx, force_hard_line, true, f);
     } else {
         value::write_comma_group(elements, ctx, f);

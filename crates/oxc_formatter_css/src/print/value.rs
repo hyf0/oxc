@@ -9,7 +9,7 @@ use std::borrow::Cow;
 
 use cow_utils::CowUtils;
 use oxc_formatter_core::{
-    Buffer, Format,
+    Buffer,
     builders::{
         group, hard_line_break, indent, soft_line_break, soft_line_break_or_space, space, text,
         token,
@@ -168,9 +168,7 @@ pub fn write_dimension<'a>(dimension: &Dimension<'a>, f: &mut CssFormatter<'_, '
 
 /// Prettier's `printString`: re-quote according to `singleQuote` unless the
 /// content contains quotes that would need extra escaping.
-pub fn write_str<'a>(str: &Str<'a>, f: &mut CssFormatter<'_, 'a>) {
-    let raw = str.raw;
-    let single_quote = f.options().single_quote.value();
+pub fn print_string(raw: &str, single_quote: bool) -> Cow<'_, str> {
     let content = &raw[1..raw.len() - 1];
 
     let (preferred, alternate) = if single_quote { ('\'', '"') } else { ('"', '\'') };
@@ -186,8 +184,7 @@ pub fn write_str<'a>(str: &Str<'a>, f: &mut CssFormatter<'_, 'a>) {
     let enclosing = if preferred_count > alternate_count { alternate } else { preferred };
 
     if raw.as_bytes()[0] == enclosing as u8 {
-        write!(f, text(raw));
-        return;
+        return Cow::Borrowed(raw);
     }
 
     // makeString: flip escapes as needed.
@@ -220,7 +217,153 @@ pub fn write_str<'a>(str: &Str<'a>, f: &mut CssFormatter<'_, 'a>) {
         }
     }
     out.push(enclosing);
-    write!(f, text(f.allocator().alloc_str(&out)));
+    Cow::Owned(out)
+}
+
+pub fn write_str<'a>(str: &Str<'a>, f: &mut CssFormatter<'_, 'a>) {
+    let single_quote = f.options().single_quote.value();
+    match print_string(str.raw, single_quote) {
+        Cow::Borrowed(s) => write!(f, text(s)),
+        Cow::Owned(s) => write!(f, text(f.allocator().alloc_str(&s))),
+    }
+}
+
+/// Prettier's `adjustNumbers(adjustStrings(...))` over a raw source slice:
+/// strings re-quote via `printString`, standalone numbers (not glued to a
+/// word part) get `printCssNumber` + lowercased/canonical unit; everything
+/// else — whitespace and newlines included — stays verbatim. Used where
+/// Prettier prints raw selector text: Less mixin definitions/calls and
+/// `when` guards.
+pub fn adjust_numbers_and_strings(raw: &str, single_quote: bool) -> Cow<'_, str> {
+    let bytes = raw.as_bytes();
+    let mut out = String::with_capacity(raw.len());
+    let mut changed = false;
+    let mut i = 0usize;
+
+    let is_word_start = |b: u8| b == b'_' || b.is_ascii_alphabetic() || b >= 0x80;
+    let is_word_char = |b: u8| b == b'_' || b == b'-' || b.is_ascii_alphanumeric() || b >= 0x80;
+    // `(?:\d*\.\d+|\d+\.?)(?:e[+-]?\d+)?` — returns the end index, or `start`
+    // if no number begins here.
+    let scan_number = |start: usize| -> usize {
+        let mut j = start;
+        while j < bytes.len() && bytes[j].is_ascii_digit() {
+            j += 1;
+        }
+        if j < bytes.len() && bytes[j] == b'.' {
+            let mut k = j + 1;
+            while k < bytes.len() && bytes[k].is_ascii_digit() {
+                k += 1;
+            }
+            // `\d*\.\d+` needs fraction digits; `\d+\.` allows a bare dot.
+            if k > j + 1 {
+                j = k;
+            } else if j > start {
+                j += 1;
+            } else {
+                return start;
+            }
+        } else if j == start {
+            return start;
+        }
+        // Exponent.
+        if j < bytes.len() && (bytes[j] | 0x20) == b'e' {
+            let mut k = j + 1;
+            if k < bytes.len() && (bytes[k] == b'+' || bytes[k] == b'-') {
+                k += 1;
+            }
+            let digits_start = k;
+            while k < bytes.len() && bytes[k].is_ascii_digit() {
+                k += 1;
+            }
+            if k > digits_start {
+                j = k;
+            }
+        }
+        j
+    };
+    let scan_unit = |start: usize| -> usize {
+        let mut j = start;
+        while j < bytes.len() && bytes[j].is_ascii_alphabetic() {
+            j += 1;
+        }
+        j
+    };
+
+    while i < bytes.len() {
+        let b = bytes[i];
+        // Strings: re-quote, never adjust their content as numbers.
+        if b == b'"' || b == b'\'' {
+            let mut j = i + 1;
+            while j < bytes.len() && bytes[j] != b {
+                j += if bytes[j] == b'\\' { 2 } else { 1 };
+            }
+            if j < bytes.len() {
+                let printed = print_string(&raw[i..=j], single_quote);
+                changed |= matches!(printed, Cow::Owned(_));
+                out.push_str(&printed);
+                i = j + 1;
+                continue;
+            }
+            // Unterminated: plain char.
+            out.push(b as char);
+            i += 1;
+            continue;
+        }
+        // Word part `[$@]?[_a-z-￿][\w-￿-]*`; a number
+        // glued to it (plus its unit) is left untouched.
+        let word_start =
+            if (b == b'$' || b == b'@') && i + 1 < bytes.len() && is_word_start(bytes[i + 1]) {
+                Some(i + 1)
+            } else if is_word_start(b) {
+                Some(i)
+            } else {
+                None
+            };
+        if let Some(ws) = word_start {
+            let mut j = ws;
+            while j < bytes.len() && is_word_char(bytes[j]) {
+                j += 1;
+            }
+            let number_end = scan_number(j);
+            if number_end > j {
+                j = scan_unit(number_end);
+            }
+            out.push_str(&raw[i..j]);
+            i = j;
+            continue;
+        }
+        // Standalone number (+ optional unit).
+        if b.is_ascii_digit() || b == b'.' {
+            let number_end = scan_number(i);
+            if number_end > i {
+                let unit_end = scan_unit(number_end);
+                let number = &raw[i..number_end];
+                let unit = &raw[number_end..unit_end];
+                let lowered_unit = unit.cow_to_ascii_lowercase();
+                let canonical = canonical_unit(&lowered_unit);
+                if unit.is_empty() || lowered_unit == "n" || canonical.is_some() {
+                    let printed = print_css_number(number);
+                    changed |= matches!(printed, Cow::Owned(_));
+                    out.push_str(&printed);
+                    if !unit.is_empty() {
+                        let printed_unit = canonical.unwrap_or(lowered_unit.as_ref());
+                        changed |= printed_unit != unit;
+                        out.push_str(printed_unit);
+                    }
+                } else {
+                    out.push_str(&raw[i..unit_end]);
+                }
+                i = unit_end;
+                continue;
+            }
+        }
+        // Plain byte; push the whole UTF-8 char.
+        let ch_len = raw[i..].chars().next().map_or(1, char::len_utf8);
+        out.push_str(&raw[i..i + ch_len]);
+        i += ch_len;
+    }
+
+    if changed { Cow::Owned(out) } else { Cow::Borrowed(raw) }
 }
 
 /// Re-quotes the OUTER quotes of a raw quoted string per `singleQuote`,
@@ -365,7 +508,8 @@ fn function_name_text<'a>(func: &Function<'a>) -> &'a str {
 pub struct ValueContext<'a> {
     /// Lowercased property name of the enclosing declaration, if any.
     pub decl_prop: Option<&'a str>,
-    /// `composes` values never break (Prettier's `removeLines`).
+    /// The value never breaks: `composes` (Prettier's `removeLines`) and
+    /// media feature values (Prettier's `media-value` is flat text).
     pub no_break: bool,
     /// SCSS map printed in key position: stays inline (Prettier's `isKey`).
     pub map_key: bool,
@@ -389,6 +533,10 @@ pub struct ValueContext<'a> {
     /// printer counts its full width, so the first trailing comment always
     /// wraps.
     pub tail_break: bool,
+    /// Less variable declaration value (`@var: ...`): Prettier's
+    /// `shouldPrecededBySoftline` matches `css-decl` ONLY, so the value fill
+    /// starts on the colon line and never breaks right after the colon.
+    pub no_leading_softline: bool,
 }
 
 impl ValueContext<'_> {
@@ -451,9 +599,30 @@ pub fn write_declaration_value<'a>(
     let has_comments =
         f.context().comments().iter_before(value_end).any(|c| c.span.start >= value_start);
     let force_hard_line = !ctx.decl_prop.is_some_and(|p| p.starts_with("--"))
-        && (groups.iter().any(|g| g.len() > 1) || has_comments);
+        && (groups.iter().enumerate().any(|(i, g)| comma_group_is_multi(g, i == 0))
+            || has_comments);
 
     write_value_groups(&groups, ctx, force_hard_line, true, f);
+}
+
+/// Does this comma group count as a `value-comma_group` for Prettier's
+/// `shouldBreakList`? Multi-element groups do; so does a single ident with a
+/// leading `-` in non-initial position, which postcss-values splits into an
+/// operator + word (`Arial, -apple-system` breaks the list while
+/// `-apple-system, Arial` does not).
+pub fn comma_group_is_multi(group: &[ComponentValue<'_>], is_first: bool) -> bool {
+    if group.len() > 1 {
+        return true;
+    }
+    // Less `~'...'` lexes as TWO postcss-values nodes (`~` word + string), so
+    // it is a real `value-comma_group` in ANY position.
+    if matches!(group.first(), Some(ComponentValue::LessEscapedStr(_))) {
+        return true;
+    }
+    !is_first
+        && matches!(group.first(),
+            Some(ComponentValue::InterpolableIdent(raffia::ast::InterpolableIdent::Literal(id)))
+                if id.raw.starts_with('-') && !id.raw.starts_with("--"))
 }
 
 /// Top-level comma-group list layout, shared between flat component streams
@@ -536,7 +705,9 @@ pub fn write_value_groups<'a>(
         write!(f, indent(&body));
     } else {
         let body = format_with(move |f: &mut CssFormatter<'_, 'a>| {
-            write!(f, soft_line_break());
+            if !ctx.no_leading_softline {
+                write!(f, soft_line_break());
+            }
             let mut filler = f.fill();
             for (i, group_values) in groups.iter().enumerate() {
                 let is_last = i + 1 == groups.len();
@@ -643,6 +814,20 @@ pub fn flush_trailing_value_comments(
     last_end
 }
 
+/// A value that is exactly one sass interpolation (`--p: #{fn(...)};`).
+/// Prettier's value parser splits `#{` into multiple fill chunks, and a fill
+/// chunk's fit ignores the rest of the line (`;`, trailing comments) — unlike
+/// a bare func (`calc`), whose group fit counts them. `write_comma_group`
+/// routes this shape through a fill entry for the chunk-isolated fit, and
+/// `write_declaration` exempts it from tail-comment counting.
+pub fn is_single_sass_interpolation(values: &[ComponentValue<'_>]) -> bool {
+    values.len() == 1
+        && matches!(
+            values[0],
+            ComponentValue::InterpolableIdent(raffia::ast::InterpolableIdent::SassInterpolated(_))
+        )
+}
+
 /// Mirrors Prettier's `printCommaSeparatedValueGroup`:
 /// joins components with `line`, except for pairs that must stay tight.
 pub fn write_comma_group<'a>(
@@ -659,7 +844,19 @@ pub fn write_comma_group<'a>(
         let after_inline = flush_value_comments(to_span(values[0].span()).start, f);
         let ctx =
             if after_inline { ValueContext { after_inline_comment: true, ..ctx } } else { ctx };
-        write_component_value(&values[0], ctx, f);
+        // EXCEPT a sass interpolation: route through a fill entry to get the
+        // chunk-isolated fit (see `is_single_sass_interpolation`).
+        if is_single_sass_interpolation(values) {
+            let value = &values[0];
+            let content = format_with(move |f: &mut CssFormatter<'_, 'a>| {
+                write_component_value(value, ctx, f);
+            });
+            let mut filler = f.fill();
+            filler.entry(&soft_line_break_or_space(), &content);
+            filler.finish();
+        } else {
+            write_component_value(&values[0], ctx, f);
+        }
         return;
     }
     // A single value WITH a tail bound routes through the fill below so its
@@ -880,13 +1077,15 @@ fn separator_between(
     // `hasEmptyRawBefore(iNode)`
     let prev_gap_empty = i >= 2 && to_span(values[i - 2].span()).end == prev_span.start;
 
-    // Grid: preserve source line structure.
+    // Grid: preserve source line structure — Prettier emits a hardline where
+    // the source breaks and a PLAIN SPACE otherwise (never re-wraps a
+    // single-line grid value, however long).
     if ctx.is_grid() {
         let gap = source.bytes_range(prev_span.end, curr_span.start);
         if gap.contains(&b'\n') || gap.contains(&b'\r') {
             return Separator::Hard;
         }
-        return Separator::Line;
+        return Separator::Space;
     }
 
     // Solidus (`/`) spacing rules.
@@ -1070,6 +1269,23 @@ fn separator_between(
         return Separator::Tight;
     }
 
+    // postcss-values lexes `1#{$var}` as ONE word: a neighbor glued to an
+    // interpolated ident stays glued.
+    {
+        let interpolated = |v: &ComponentValue<'_>| {
+            matches!(
+                v,
+                ComponentValue::InterpolableIdent(
+                    raffia::ast::InterpolableIdent::SassInterpolated(_)
+                        | raffia::ast::InterpolableIdent::LessInterpolated(_),
+                )
+            )
+        };
+        if gap_empty && (interpolated(prev) || interpolated(curr)) {
+            return Separator::Tight;
+        }
+    }
+
     // Math operators with surrounding spaces: `a + b` keeps the space before
     // the operator non-breaking and breaks after it (Prettier's
     // `isNextMathOperator` merge).
@@ -1120,6 +1336,18 @@ pub fn write_component_value<'a>(
             } else {
                 write!(f, text(ident.raw));
             }
+        }
+        ComponentValue::InterpolableIdent(raffia::ast::InterpolableIdent::SassInterpolated(
+            interp,
+        )) => {
+            // Prettier's value parser splits `#{fn(...)}` into multiple fill
+            // chunks wrapped in the value's `group(indent(fill))`, so a
+            // breaking call inside the interpolation carries ONE extra indent
+            // level (`args` +2, `)}` +1 relative to the property).
+            let body = format_with(move |f: &mut CssFormatter<'_, 'a>| {
+                write_sass_interpolated_ident(interp, ctx, f);
+            });
+            write!(f, indent(&body));
         }
         ComponentValue::InterpolableStr(raffia::ast::InterpolableStr::Literal(str)) => {
             write_str(str, f);
@@ -1208,9 +1436,14 @@ pub fn write_component_value<'a>(
                 raffia::ast::SassUnaryOperatorKind::Minus => write!(f, "-"),
                 raffia::ast::SassUnaryOperatorKind::Not => write!(f, ["not", " "]),
             }
-            // Keep the source gap (`- pow(2, 2)` stays spaced); `not` already
-            // wrote its single separator space.
-            if !keyword_not && to_span(unary.op.span()).end != to_span(unary.expr.span()).start {
+            // Prettier glues a unary `+`/`-` to its operand even across a
+            // source gap (`- ( $x / 2 )` → `-($x / 2)`, `- 2deg` → `-2deg`) —
+            // EXCEPT before a function call, where the gap is preserved
+            // (`- pow(2, 2)` stays spaced). `not` already wrote its space.
+            if !keyword_not
+                && is_func_like(&unary.expr)
+                && to_span(unary.op.span()).end != to_span(unary.expr.span()).start
+            {
                 write!(f, " ");
             }
             write_component_value(&unary.expr, ctx, f);
@@ -1266,8 +1499,19 @@ pub fn write_component_value<'a>(
             let span = to_span(range.span());
             write!(f, text(source.text_for(&span)));
         }
+        // `~'...'`: postcss sees a plain string token after the `~`, so it
+        // re-quotes per `singleQuote` like any other string.
+        ComponentValue::LessEscapedStr(escaped) => {
+            write!(f, "~");
+            write_str(&escaped.str, f);
+        }
         // Everything else (Sass/Less constructs, interpolations, token
         // fallbacks): print the source verbatim until ported structurally.
+        // NOTE `LessBinaryOperation` deliberately stays verbatim: Prettier
+        // fills its flat token run (break after the operator), but matching
+        // that exactly needs operator pseudo-entries in `write_comma_group`'s
+        // fill — disproportionate for a layout-only divergence in rare
+        // theme-math values (`((@h - @f) / 2) - @a @b`).
         _ => {
             if crate::print::less::write_less_component_value(value, f) {
                 return;
@@ -1316,10 +1560,47 @@ fn write_sass_binary<'a>(
         let mut i = 0;
         while i < parts.len() {
             // Merge a run while operators are tight to the next operand.
+            // `*` never merges: Prettier excludes multiplication from the
+            // tight rules (`$m*100` → `$m * 100`). Word-like operands force
+            // spaces on BOTH sides even when glued (`$a+"str"` → `$a + "str"`),
+            // so they end the run too.
             let mut run_end = i;
+            let mut division_force_space = false;
             while let Some(op) = parts[run_end].1 {
+                if matches!(op.kind, raffia::ast::SassBinaryOperatorKind::Multiply) {
+                    break;
+                }
                 let op_span = to_span(op.span());
-                let next_start = to_span(parts[run_end + 1].0.span()).start;
+                let next = &parts[run_end + 1].0;
+                let operand = &parts[run_end].0;
+                // Division mirrors postcss-values lexing: a word-led chunk
+                // absorbs a directly attached `/` (`$w/2`, `$w/ 2` stay
+                // verbatim); otherwise word/func NEIGHBORS force spaces on
+                // both sides (`2/$w` -> `2 / $w`, `$w /2` -> `$w / 2`) while
+                // plain numbers keep the source gap (`10px/8px`, `1/2`).
+                if matches!(op.kind, raffia::ast::SassBinaryOperatorKind::Division) {
+                    let wf = |v: &ComponentValue<'_>| is_word_like(v) || is_func_like(v);
+                    let left_absorbs = to_span(operand.span()).end == op_span.start && wf(operand);
+                    if !left_absorbs {
+                        let near_wordish = wf(operand)
+                            || wf(next)
+                            || run_end.checked_sub(1).is_some_and(|k| wf(parts[k].0))
+                            || parts.get(run_end + 2).is_some_and(|(o, _)| wf(o));
+                        if near_wordish {
+                            division_force_space = true;
+                            break;
+                        }
+                    }
+                }
+                if matches!(source.text_for(&op_span), "+" | "-")
+                    && (is_word_like(operand)
+                        || is_func_like(operand)
+                        || is_word_like(next)
+                        || is_func_like(next))
+                {
+                    break;
+                }
+                let next_start = to_span(next.span()).start;
                 if op_span.end == next_start {
                     run_end += 1;
                 } else {
@@ -1345,8 +1626,15 @@ fn write_sass_binary<'a>(
                                 || run.get(j + 1).is_some_and(|(next, _)| {
                                     is_word_like(next) || is_func_like(next)
                                 }));
+                        // Division: space before `/` unless a word-led
+                        // operand absorbs it (see the run-merge rule above).
+                        let division_spaces =
+                            op_text == "/" && division_force_space && j + 1 == run.len();
                         if operand_end != op_span.start
                             || wordish
+                            || division_spaces
+                            // `*` always spaces (it also ends its run above).
+                            || op_text == "*"
                             || (fuses_paren
                                 && run.get(j + 1).is_some_and(|(next, _)| {
                                     matches!(next, ComponentValue::SassParenthesizedExpression(_))
@@ -1375,70 +1663,197 @@ fn write_calc<'a>(
     f: &mut CssFormatter<'_, 'a>,
 ) {
     use raffia::ast::CalcOperatorKind;
-    let left_end = to_span(calc.left.span()).end;
-    let op_span = to_span(calc.op.span());
-    let right_start = to_span(calc.right.span()).start;
-    let gap_before_op = left_end != op_span.start;
-    let gap_after_op = op_span.end != right_start;
 
-    let op_str: &'static str = match calc.op.kind {
-        CalcOperatorKind::Plus => "+",
-        CalcOperatorKind::Minus => "-",
-        CalcOperatorKind::Multiply => "*",
-        CalcOperatorKind::Division => "/",
+    // Prettier prints calc contents as a FLAT run of word/operator fill
+    // chunks (postcss-values has no expression tree): every operator glues
+    // to its LEFT operand with the break opportunity after it, and
+    // continuation lines share ONE uniform indent — nested unparenthesized
+    // operations do NOT nest groups/indents. A parenthesized sub-expression
+    // stays a single chunk. Source-glued runs (`1px+2px`) stay glued.
+    enum Piece<'b, 'a> {
+        /// The bool: print the operand's own source parens around it
+        /// (computed once at flatten time — `calc_operand_has_own_parens`
+        /// scans the source).
+        Operand(&'b ComponentValue<'a>, bool),
+        Op(&'static str),
+        Space,
+    }
+
+    fn flatten<'b, 'a>(
+        calc: &'b raffia::ast::Calc<'a>,
+        f: &CssFormatter<'_, 'a>,
+        chunks: &mut Vec<Vec<Piece<'b, 'a>>>,
+        current: &mut Vec<Piece<'b, 'a>>,
+    ) {
+        let op_str: &'static str = match calc.op.kind {
+            CalcOperatorKind::Plus => "+",
+            CalcOperatorKind::Minus => "-",
+            CalcOperatorKind::Multiply => "*",
+            CalcOperatorKind::Division => "/",
+        };
+        let left_end = to_span(calc.left.span()).end;
+        let op_span = to_span(calc.op.span());
+        let right_start = to_span(calc.right.span()).start;
+
+        push_operand(&calc.left, f, chunks, current);
+        if left_end != op_span.start {
+            current.push(Piece::Space);
+        }
+        current.push(Piece::Op(op_str));
+        if op_span.end != right_start {
+            chunks.push(std::mem::take(current));
+        }
+        push_operand(&calc.right, f, chunks, current);
+    }
+
+    fn push_operand<'b, 'a>(
+        operand: &'b ComponentValue<'a>,
+        f: &CssFormatter<'_, 'a>,
+        chunks: &mut Vec<Vec<Piece<'b, 'a>>>,
+        current: &mut Vec<Piece<'b, 'a>>,
+    ) {
+        let wrapped = calc_operand_has_own_parens(operand, f);
+        if let ComponentValue::Calc(inner) = operand
+            && !wrapped
+        {
+            flatten(inner, f, chunks, current);
+        } else {
+            current.push(Piece::Operand(operand, wrapped));
+        }
+    }
+
+    let mut chunks: Vec<Vec<Piece<'_, 'a>>> = vec![];
+    let mut current: Vec<Piece<'_, 'a>> = vec![];
+    flatten(calc, f, &mut chunks, &mut current);
+    if !current.is_empty() {
+        chunks.push(current);
+    }
+
+    let write_chunk = |chunk: &[Piece<'_, 'a>], f: &mut CssFormatter<'_, 'a>| {
+        for piece in chunk {
+            match piece {
+                Piece::Operand(operand, wrapped) => {
+                    if *wrapped {
+                        write!(f, "(");
+                    }
+                    write_component_value(operand, ctx, f);
+                    if *wrapped {
+                        write!(f, ")");
+                    }
+                }
+                Piece::Op(op) => write!(f, token(op)),
+                Piece::Space => write!(f, " "),
+            }
+        }
     };
 
-    let head = format_with(move |f: &mut CssFormatter<'_, 'a>| {
-        write_calc_operand(&calc.left, ctx, f);
-        if gap_before_op {
-            write!(f, " ");
+    if ctx.no_break || chunks.len() == 1 {
+        for (i, chunk) in chunks.iter().enumerate() {
+            if i > 0 {
+                write!(f, " ");
+            }
+            write_chunk(chunk, f);
         }
-        write!(f, token(op_str));
-        if !gap_after_op {
-            write_calc_operand(&calc.right, ctx, f);
-        }
-    });
-
-    if gap_after_op {
-        let body = format_with(move |f: &mut CssFormatter<'_, 'a>| {
-            let mut filler = f.fill();
-            let right = format_with(move |f: &mut CssFormatter<'_, 'a>| {
-                write_calc_operand(&calc.right, ctx, f);
-            });
-            filler.entry(&soft_line_break_or_space(), &head);
-            filler.entry(&soft_line_break_or_space(), &right);
-            filler.finish();
-        });
-        write!(f, group(&indent(&body)));
-    } else {
-        head.fmt(f);
+        return;
     }
+
+    let chunks_ref = &chunks;
+    let body = format_with(move |f: &mut CssFormatter<'_, 'a>| {
+        let mut filler = f.fill();
+        for chunk in chunks_ref {
+            let content = format_with(move |f: &mut CssFormatter<'_, 'a>| {
+                write_chunk(chunk, f);
+            });
+            filler.entry(&soft_line_break_or_space(), &content);
+        }
+        filler.finish();
+    });
+    write!(f, group(&indent(&body)));
 }
 
-/// A calc operand, restoring ONE pair of parens from the source when present.
+/// Whether a calc operand has ONE pair of source parens of its own to restore.
 ///
 /// raffia folds `(a - b) * c` into nested `Calc` nodes whose spans EXCLUDE
 /// the parens, so they must be recovered from the source (postcss keeps them
 /// as a `value-paren_group` and Prettier preserves them). Only an operand
 /// position can do this safely: at the top of `calc(...)` the function's own
 /// parens are indistinguishable from a redundant pair.
-fn write_calc_operand<'a>(
-    operand: &ComponentValue<'a>,
-    ctx: ValueContext<'a>,
-    f: &mut CssFormatter<'_, 'a>,
-) {
+fn calc_operand_has_own_parens(operand: &ComponentValue<'_>, f: &CssFormatter<'_, '_>) -> bool {
+    let span = to_span(operand.span());
+    let source_len = u32::try_from(f.context().source_text().len()).unwrap_or(u32::MAX);
+    own_paren_layers(span.start, span.end, 0, source_len, f) >= 1
+}
+
+/// Layers of source parens that belong to a function-argument group itself.
+///
+/// raffia drops bare parens around argument values — `min(((@a)), @b)`
+/// parses the first argument as just `@a`, and a `Calc` argument's span
+/// excludes its outermost source parens (`max(((a - b) / 2), 0)`). postcss
+/// keeps every pair as a `value-paren_group`, so Prettier prints them all.
+/// The scan is bounded by the function's own parens (`region`).
+fn group_own_paren_layers(
+    group: &[ComponentValue<'_>],
+    region_start: u32,
+    region_end: u32,
+    f: &CssFormatter<'_, '_>,
+) -> u32 {
+    let (Some(first), Some(last)) = (group.first(), group.last()) else { return 0 };
+    let start = to_span(first.span()).start;
+    let end = to_span(last.span()).end;
+    if start < region_start || end > region_end {
+        return 0;
+    }
+    own_paren_layers(start, end, region_start, region_end, f)
+}
+
+/// How many pairs of source parens around `start..end` (within `region`)
+/// belong to that span itself.
+///
+/// The span may already contain unbalanced parens belonging to CHILD
+/// operands, whose own pairs also sit outside their spans (`(a - 1) * b`
+/// spans from `a`). Those are reprinted when the child's own chunk is
+/// written; the span owns a pair only when a further `(`/`)` exists beyond
+/// what the children account for.
+fn own_paren_layers(
+    start: u32,
+    end: u32,
+    region_start: u32,
+    region_end: u32,
+    f: &CssFormatter<'_, '_>,
+) -> u32 {
     let source = f.context().source_text();
     let bytes = source.as_bytes();
-    let span = to_span(operand.span());
 
-    // The span may already contain unbalanced parens belonging to CHILD
-    // operands, whose own pairs also sit outside their spans
-    // (`(a - 1) * b` spans from `a`). Those are reprinted by the child's own
-    // `write_calc_operand` call; the operand has a pair of its OWN only when
-    // a further `(`/`)` exists beyond what the children account for.
+    // The adjacency scans stop at the first non-paren byte, so they are
+    // cheap — run them first and bail out before the O(span) balance scan
+    // (in plain CSS there is almost never an adjacent paren at all).
+    let opens = i32::try_from(
+        bytes[region_start as usize..start as usize]
+            .iter()
+            .rev()
+            .filter(|b| !b.is_ascii_whitespace())
+            .take_while(|&&b| b == b'(')
+            .count(),
+    )
+    .unwrap_or(0);
+    if opens == 0 {
+        return 0;
+    }
+    let closes = i32::try_from(
+        bytes[end as usize..region_end as usize]
+            .iter()
+            .filter(|b| !b.is_ascii_whitespace())
+            .take_while(|&&b| b == b')')
+            .count(),
+    )
+    .unwrap_or(0);
+    if closes == 0 {
+        return 0;
+    }
+
     let mut depth = 0i32;
     let mut min_depth = 0i32;
-    for &b in &bytes[span.start as usize..span.end as usize] {
+    for &b in &bytes[start as usize..end as usize] {
         match b {
             b'(' => depth += 1,
             b')' => {
@@ -1448,53 +1863,21 @@ fn write_calc_operand<'a>(
             _ => {}
         }
     }
-    // `[need_left x '('] span [need_right x ')']` balances to zero.
+    // `[need_left x '('] span [need_right x ')']` balances to zero; anything
+    // beyond that within the region is the span's own.
     let need_left = -min_depth;
     let need_right = depth - min_depth;
 
-    let own_open = {
-        let mut skip = need_left;
-        bytes[..span.start as usize]
-            .iter()
-            .rev()
-            .filter(|b| !b.is_ascii_whitespace())
-            .take_while(|&&b| b == b'(')
-            .any(|_| {
-                if skip == 0 {
-                    return true;
-                }
-                skip -= 1;
-                false
-            })
-    };
-    let own_close = {
-        let mut skip = need_right;
-        bytes[span.end as usize..]
-            .iter()
-            .filter(|b| !b.is_ascii_whitespace())
-            .take_while(|&&b| b == b')')
-            .any(|_| {
-                if skip == 0 {
-                    return true;
-                }
-                skip -= 1;
-                false
-            })
-    };
-    let wrapped = own_open && own_close;
-
-    if wrapped {
-        write!(f, "(");
-    }
-    write_component_value(operand, ctx, f);
-    if wrapped {
-        write!(f, ")");
-    }
+    u32::try_from((opens - need_left).min(closes - need_right).max(0)).unwrap_or(0)
 }
 
 /// Function call: `name(` + args + `)`.
 /// Mirrors `value-func` + `value-paren_group` with parens.
-fn write_function<'a>(func: &Function<'a>, ctx: ValueContext<'a>, f: &mut CssFormatter<'_, 'a>) {
+pub fn write_function<'a>(
+    func: &Function<'a>,
+    ctx: ValueContext<'a>,
+    f: &mut CssFormatter<'_, 'a>,
+) {
     let source = f.context().source_text();
     let name_span = to_span(func.name.span());
     write!(f, text(source.text_for(&name_span)));
@@ -1533,6 +1916,35 @@ fn write_function<'a>(func: &Function<'a>, ctx: ValueContext<'a>, f: &mut CssFor
         return;
     }
 
+    let args_region = (name_span.end + 1, to_span(func.span()).end.saturating_sub(1));
+    // One argument group, with the source parens raffia dropped restored.
+    let write_arg_group = move |group_values: &[ComponentValue<'a>],
+                                ctx: ValueContext<'a>,
+                                f: &mut CssFormatter<'_, 'a>| {
+        let layers = group_own_paren_layers(group_values, args_region.0, args_region.1, f);
+        for _ in 0..layers {
+            write!(f, "(");
+        }
+        write_comma_group(group_values, ctx, f);
+        for _ in 0..layers {
+            write!(f, ")");
+        }
+    };
+
+    // `no_break` (composes `removeLines` / media-value flat text): no break
+    // opportunities, args joined inline.
+    if ctx.no_break {
+        write!(f, "(");
+        for (i, group_values) in groups.iter().enumerate() {
+            if i > 0 {
+                write!(f, [",", " "]);
+            }
+            write_arg_group(group_values, ctx, f);
+        }
+        write!(f, ")");
+        return;
+    }
+
     let groups_ref = &groups;
     let r_paren = to_span(func.span()).end.saturating_sub(1);
     let extra_indent = ctx.after_inline_comment;
@@ -1547,6 +1959,7 @@ fn write_function<'a>(func: &Function<'a>, ctx: ValueContext<'a>, f: &mut CssFor
         paren_break: false,
         in_args: true,
         after_inline_comment: false,
+        no_leading_softline: false,
         ..ctx
     };
     let body = format_with(move |f: &mut CssFormatter<'_, 'a>| {
@@ -1574,7 +1987,7 @@ fn write_function<'a>(func: &Function<'a>, ctx: ValueContext<'a>, f: &mut CssFor
                     write!(f, soft_line_break_or_space());
                 }
             }
-            write_comma_group(group_values, ctx, f);
+            write_arg_group(group_values, ctx, f);
         }
         if has_trailing_comma {
             write!(f, ",");
@@ -1633,14 +2046,34 @@ fn write_function<'a>(func: &Function<'a>, ctx: ValueContext<'a>, f: &mut CssFor
 }
 
 /// `url(...)`: contents are never reformatted.
+/// `#{ $a + $b }` normalizes to `#{$a + $b}`: postcss-values tokenizes
+/// through the interpolation, so Prettier reprints the expression (no inner
+/// padding, one space around operators; idents/variables keep their case,
+/// dimensions/strings get the normal value normalization).
+pub fn write_sass_interpolated_ident<'a>(
+    interp: &raffia::ast::SassInterpolatedIdent<'a>,
+    ctx: ValueContext<'a>,
+    f: &mut CssFormatter<'_, 'a>,
+) {
+    for element in &interp.elements {
+        match element {
+            raffia::ast::SassInterpolatedIdentElement::Static(part) => {
+                write!(f, text(part.raw));
+            }
+            raffia::ast::SassInterpolatedIdentElement::Expression(expr) => {
+                write!(f, "#{");
+                write_component_value(expr, ctx, f);
+                write!(f, "}");
+            }
+        }
+    }
+}
+
 pub fn write_url<'a>(url: &Url<'a>, f: &mut CssFormatter<'_, 'a>) {
     let source = f.context().source_text();
     let name_span = to_span(url.name.span());
-    let name = source.text_for(&name_span);
-    match name.cow_to_ascii_lowercase() {
-        Cow::Borrowed(s) => write!(f, text(s)),
-        Cow::Owned(s) => write!(f, text(f.allocator().alloc_str(&s))),
-    }
+    // Prettier preserves function-name casing (`URL(...)` stays uppercase).
+    write!(f, text(source.text_for(&name_span)));
     write!(f, "(");
     match &url.value {
         Some(raffia::ast::UrlValue::Str(raffia::ast::InterpolableStr::Literal(str))) => {

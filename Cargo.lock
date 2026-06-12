@@ -3193,7 +3193,7 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 [[package]]
 name = "raffia"
 version = "0.12.3"
-source = "git+https://github.com/leaysgur/raffia?rev=96b45733b3b10bf5907c3ee4caed960959429001#96b45733b3b10bf5907c3ee4caed960959429001"
+source = "git+https://github.com/leaysgur/raffia?rev=524686f0e8797875be26cf6a1db3980de69bffa0#524686f0e8797875be26cf6a1db3980de69bffa0"
 dependencies = [
  "raffia_macro",
  "smallvec",
@@ -3202,7 +3202,7 @@ dependencies = [
 [[package]]
 name = "raffia_macro"
 version = "0.2.0"
-source = "git+https://github.com/leaysgur/raffia?rev=96b45733b3b10bf5907c3ee4caed960959429001#96b45733b3b10bf5907c3ee4caed960959429001"
+source = "git+https://github.com/leaysgur/raffia?rev=524686f0e8797875be26cf6a1db3980de69bffa0#524686f0e8797875be26cf6a1db3980de69bffa0"
 dependencies = [
  "heck",
  "quote",
