@@ -38,8 +38,7 @@ checksum = "a23eb6b1614318a8071c9b2521f36b424b2c83db5eb3a0fead4a6c0809af6e61"
 [[package]]
 name = "apollo-parser"
 version = "0.8.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "11f6e2be4b3474e5890d34d3e483d49ec9b5cbf9e358bc62c9cc5423376df54b"
+source = "git+https://github.com/leaysgur/apollo-rs?rev=99dffe1e7e7eb738fb2c93e4f670f914bf01e870#99dffe1e7e7eb738fb2c93e4f670f914bf01e870"
 dependencies = [
  "memchr",
  "rowan",

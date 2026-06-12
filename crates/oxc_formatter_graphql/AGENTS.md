@@ -12,11 +12,18 @@ Prettier compatible GraphQL formatter (`oxfmt`'s Tier 1 backend), using the `oxc
   - `format_to_ir()`: embedded use via the dispatcher (graphql-in-js); allocates
     from the shared `EmbeddedContext` arena, emits no BOM / trailing newline,
     and leaves `propagate_expand()` to the parent document
-- Parses with [apollo-parser](https://docs.rs/apollo-parser) (rowan-based lossless CST)
-  - Spec coverage: **October 2021 GraphQL spec only**
-  - Prettier parses with `graphql-js`, which also accepts draft-level syntax
-    (e.g. experimental fragment arguments, directives on directive definitions)
-  - Such input makes `format()` return `Err`; `oxfmt` then falls back to Prettier (napi build)
+- Parses with a [fork of apollo-parser](https://github.com/leaysgur/apollo-rs)
+  (rowan-based lossless CST), branch `graphql-draft-syntax`
+  - Base: 0.8.6 (October 2021 spec). The fork adds what Prettier's
+    graphql-js 16.12 also accepts: **2025 descriptions** on executable
+    definitions (operation / fragment / variable definition) and
+    **legacy fragment variables** (`fragment F($x: Int) on T`)
+  - NOT covered (graphql-js 17 / Prettier main draft syntax): fragment spread
+    arguments (`...F(x: 1)`), directives on directive definitions, directive
+    extensions — Prettier 3.8.4 cannot parse these either
+  - Remaining parse errors make `format()` return `Err`; there is NO Prettier
+    fallback (oxfmt reports a diagnostic for standalone files, and an embedded
+    dispatch error makes the parent print the template as-is)
 - The canonical reference is Prettier's `src/language-graphql/printer-graphql.js`
   — port its layout decisions, do not invent new ones
 
@@ -27,7 +34,8 @@ Prettier compatible GraphQL formatter (`oxfmt`'s Tier 1 backend), using the `oxc
 - apollo-parser is error-tolerant (returns a CST even for invalid input),
   but any parse error bails out; never format a broken CST
 - print-stage internal errors are also `Err`
-- The caller (oxfmt) decides what happens next (report, or Prettier fallback)
+- The caller (oxfmt) decides what happens next
+  (diagnostics for standalone files, template-as-is for embedded)
 
 ### Comments
 
@@ -58,6 +66,10 @@ the printer collapses consecutive line breaks, so they are emitted as raw `\n` t
   Counting raw newlines would over-report when tokens (e.g. the `&` between two `implements` comments, or an insignificant comma) sit on their own line.
 - A cooked `\r` escape in a string value is re-emitted as `\r`
   (Prettier emits a raw CR byte, which the core `text()` builder forbids; the string VALUE is identical).
+- Known divergence: a trailing comment on the same line as a description
+  (`"desc" # comment`) moves to the next flush point (Prettier keeps it inline).
+  Pre-existing behavior of the positional comment cursor, affects type-system
+  descriptions too; no conformance test covers this shape.
 
 ## Verification
 
@@ -75,7 +87,9 @@ covering what the Prettier conformance suite does not:
 string escape re-encoding (incl. the `\r` divergence), empty `[]` / `{}` values,
 the full set of type-system extensions, insignificant-comma trivia,
 trailing comments at various positions,
-and width-overflowing `implements` lists (which never break).
+width-overflowing `implements` lists (which never break),
+and executable descriptions + legacy fragment variables
+(comment / blank-line / width edges beyond the conformance fixtures).
 `build.rs` auto-generates a test case from every `.graphql` file using the core
 `test_support` harness. Unit tests in `tests/fixtures/mod.rs` cover parse-error
 `Err` semantics and BOM preservation; `src/comments.rs` has `classify_gap` tests
