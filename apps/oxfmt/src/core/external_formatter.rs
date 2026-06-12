@@ -344,13 +344,10 @@ impl ExternalFormatter {
                         // that Prettier's embed cannot format either — `Err`
                         // makes the parent print the template as-is, which is
                         // exactly what Prettier does when its embed throws.
-                        "css" | "scss" | "less" => {
-                            format_css_to_irs(ctx, texts, css_options).inspect_err(|err| {
-                                debug!(
-                                    "`oxc_formatter_css` failed, template stays as-is: {err}"
-                                );
-                            })
-                        }
+                        "css" | "scss" | "less" => format_css_to_irs(ctx, texts, css_options)
+                            .inspect_err(|err| {
+                                debug!("`oxc_formatter_css` failed, template stays as-is: {err}");
+                            }),
                         // Everything else: Prettier fallback (Doc→IR path)
                         _ => prettier_fallback(ctx, language, texts),
                     }
