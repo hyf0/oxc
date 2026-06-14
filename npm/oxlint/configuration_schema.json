@@ -2235,24 +2235,34 @@
               "$ref": "#/definitions/RuleNoConfig"
             },
             {
-              "type": "array",
-              "items": [
+              "anyOf": [
                 {
-                  "$ref": "#/definitions/AllowWarnDeny"
-                },
-                {
-                  "anyOf": [
+                  "type": "array",
+                  "items": [
+                    {
+                      "$ref": "#/definitions/AllowWarnDeny"
+                    },
                     {
                       "type": "number"
+                    }
+                  ],
+                  "maxItems": 2,
+                  "minItems": 2
+                },
+                {
+                  "type": "array",
+                  "items": [
+                    {
+                      "$ref": "#/definitions/AllowWarnDeny"
                     },
                     {
                       "$ref": "#/definitions/ComplexityConfig"
                     }
-                  ]
+                  ],
+                  "maxItems": 2,
+                  "minItems": 2
                 }
-              ],
-              "maxItems": 2,
-              "minItems": 2
+              ]
             }
           ]
         },
@@ -2335,7 +2345,57 @@
           "$ref": "#/definitions/RuleNoConfig"
         },
         "func-name-matching": {
-          "$ref": "#/definitions/DummyRule"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RuleNoConfig"
+            },
+            {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": [
+                    {
+                      "$ref": "#/definitions/AllowWarnDeny"
+                    },
+                    {
+                      "$ref": "#/definitions/FuncNameMatchingMode"
+                    },
+                    {
+                      "$ref": "#/definitions/FuncNameMatchingConfig"
+                    }
+                  ],
+                  "maxItems": 3,
+                  "minItems": 2
+                },
+                {
+                  "type": "array",
+                  "items": [
+                    {
+                      "$ref": "#/definitions/AllowWarnDeny"
+                    },
+                    {
+                      "$ref": "#/definitions/FuncNameMatchingMode"
+                    }
+                  ],
+                  "maxItems": 2,
+                  "minItems": 2
+                },
+                {
+                  "type": "array",
+                  "items": [
+                    {
+                      "$ref": "#/definitions/AllowWarnDeny"
+                    },
+                    {
+                      "$ref": "#/definitions/FuncNameMatchingConfig"
+                    }
+                  ],
+                  "maxItems": 2,
+                  "minItems": 2
+                }
+              ]
+            }
+          ]
         },
         "func-names": {
           "anyOf": [
@@ -3912,24 +3972,34 @@
               "$ref": "#/definitions/RuleNoConfig"
             },
             {
-              "type": "array",
-              "items": [
+              "anyOf": [
                 {
-                  "$ref": "#/definitions/AllowWarnDeny"
-                },
-                {
-                  "anyOf": [
+                  "type": "array",
+                  "items": [
+                    {
+                      "$ref": "#/definitions/AllowWarnDeny"
+                    },
                     {
                       "type": "number"
+                    }
+                  ],
+                  "maxItems": 2,
+                  "minItems": 2
+                },
+                {
+                  "type": "array",
+                  "items": [
+                    {
+                      "$ref": "#/definitions/AllowWarnDeny"
                     },
                     {
                       "$ref": "#/definitions/MaxClassesPerFileConfig"
                     }
-                  ]
+                  ],
+                  "maxItems": 2,
+                  "minItems": 2
                 }
-              ],
-              "maxItems": 2,
-              "minItems": 2
+              ]
             }
           ]
         },
@@ -3939,24 +4009,34 @@
               "$ref": "#/definitions/RuleNoConfig"
             },
             {
-              "type": "array",
-              "items": [
+              "anyOf": [
                 {
-                  "$ref": "#/definitions/AllowWarnDeny"
-                },
-                {
-                  "anyOf": [
+                  "type": "array",
+                  "items": [
+                    {
+                      "$ref": "#/definitions/AllowWarnDeny"
+                    },
                     {
                       "type": "number"
+                    }
+                  ],
+                  "maxItems": 2,
+                  "minItems": 2
+                },
+                {
+                  "type": "array",
+                  "items": [
+                    {
+                      "$ref": "#/definitions/AllowWarnDeny"
                     },
                     {
                       "$ref": "#/definitions/MaxDepth"
                     }
-                  ]
+                  ],
+                  "maxItems": 2,
+                  "minItems": 2
                 }
-              ],
-              "maxItems": 2,
-              "minItems": 2
+              ]
             }
           ]
         },
@@ -3966,24 +4046,34 @@
               "$ref": "#/definitions/RuleNoConfig"
             },
             {
-              "type": "array",
-              "items": [
+              "anyOf": [
                 {
-                  "$ref": "#/definitions/AllowWarnDeny"
-                },
-                {
-                  "anyOf": [
+                  "type": "array",
+                  "items": [
+                    {
+                      "$ref": "#/definitions/AllowWarnDeny"
+                    },
                     {
                       "type": "number"
+                    }
+                  ],
+                  "maxItems": 2,
+                  "minItems": 2
+                },
+                {
+                  "type": "array",
+                  "items": [
+                    {
+                      "$ref": "#/definitions/AllowWarnDeny"
                     },
                     {
                       "$ref": "#/definitions/MaxLinesConfig"
                     }
-                  ]
+                  ],
+                  "maxItems": 2,
+                  "minItems": 2
                 }
-              ],
-              "maxItems": 2,
-              "minItems": 2
+              ]
             }
           ]
         },
@@ -3993,24 +4083,34 @@
               "$ref": "#/definitions/RuleNoConfig"
             },
             {
-              "type": "array",
-              "items": [
+              "anyOf": [
                 {
-                  "$ref": "#/definitions/AllowWarnDeny"
-                },
-                {
-                  "anyOf": [
+                  "type": "array",
+                  "items": [
+                    {
+                      "$ref": "#/definitions/AllowWarnDeny"
+                    },
                     {
                       "type": "number"
+                    }
+                  ],
+                  "maxItems": 2,
+                  "minItems": 2
+                },
+                {
+                  "type": "array",
+                  "items": [
+                    {
+                      "$ref": "#/definitions/AllowWarnDeny"
                     },
                     {
                       "$ref": "#/definitions/MaxLinesPerFunctionConfig"
                     }
-                  ]
+                  ],
+                  "maxItems": 2,
+                  "minItems": 2
                 }
-              ],
-              "maxItems": 2,
-              "minItems": 2
+              ]
             }
           ]
         },
@@ -4020,24 +4120,34 @@
               "$ref": "#/definitions/RuleNoConfig"
             },
             {
-              "type": "array",
-              "items": [
+              "anyOf": [
                 {
-                  "$ref": "#/definitions/AllowWarnDeny"
-                },
-                {
-                  "anyOf": [
+                  "type": "array",
+                  "items": [
+                    {
+                      "$ref": "#/definitions/AllowWarnDeny"
+                    },
                     {
                       "type": "number"
+                    }
+                  ],
+                  "maxItems": 2,
+                  "minItems": 2
+                },
+                {
+                  "type": "array",
+                  "items": [
+                    {
+                      "$ref": "#/definitions/AllowWarnDeny"
                     },
                     {
                       "$ref": "#/definitions/MaxNestedCallbacks"
                     }
-                  ]
+                  ],
+                  "maxItems": 2,
+                  "minItems": 2
                 }
-              ],
-              "maxItems": 2,
-              "minItems": 2
+              ]
             }
           ]
         },
@@ -4047,24 +4157,34 @@
               "$ref": "#/definitions/RuleNoConfig"
             },
             {
-              "type": "array",
-              "items": [
+              "anyOf": [
                 {
-                  "$ref": "#/definitions/AllowWarnDeny"
-                },
-                {
-                  "anyOf": [
+                  "type": "array",
+                  "items": [
+                    {
+                      "$ref": "#/definitions/AllowWarnDeny"
+                    },
                     {
                       "type": "number"
+                    }
+                  ],
+                  "maxItems": 2,
+                  "minItems": 2
+                },
+                {
+                  "type": "array",
+                  "items": [
+                    {
+                      "$ref": "#/definitions/AllowWarnDeny"
                     },
                     {
                       "$ref": "#/definitions/MaxParamsConfig"
                     }
-                  ]
+                  ],
+                  "maxItems": 2,
+                  "minItems": 2
                 }
-              ],
-              "maxItems": 2,
-              "minItems": 2
+              ]
             }
           ]
         },
@@ -4074,24 +4194,34 @@
               "$ref": "#/definitions/RuleNoConfig"
             },
             {
-              "type": "array",
-              "items": [
+              "anyOf": [
                 {
-                  "$ref": "#/definitions/AllowWarnDeny"
-                },
-                {
-                  "anyOf": [
+                  "type": "array",
+                  "items": [
+                    {
+                      "$ref": "#/definitions/AllowWarnDeny"
+                    },
                     {
                       "type": "number"
+                    }
+                  ],
+                  "maxItems": 2,
+                  "minItems": 2
+                },
+                {
+                  "type": "array",
+                  "items": [
+                    {
+                      "$ref": "#/definitions/AllowWarnDeny"
                     },
                     {
                       "$ref": "#/definitions/MaxStatementsConfig"
                     }
-                  ]
+                  ],
+                  "maxItems": 2,
+                  "minItems": 2
                 }
-              ],
-              "maxItems": 2,
-              "minItems": 2
+              ]
             }
           ]
         },
@@ -10551,6 +10681,31 @@
           ],
           "markdownDescription": "This mode enforces the standard form for React fragments.\n\nExamples of **incorrect** code for this rule:\n```jsx\n<><Foo /></>\n```\n\nExamples of **correct** code for this rule:\n```jsx\n<React.Fragment><Foo /></React.Fragment>\n```\n\n```jsx\n<React.Fragment key=\"key\"><Foo /></React.Fragment>\n```"
         }
+      ]
+    },
+    "FuncNameMatchingConfig": {
+      "type": "object",
+      "properties": {
+        "considerPropertyDescriptor": {
+          "description": "If `considerPropertyDescriptor` is set to `true`, the check will take into account the use of `Object.create`, `Object.defineProperty`, `Object.defineProperties`, and `Reflect.defineProperty`.",
+          "default": false,
+          "type": "boolean",
+          "markdownDescription": "If `considerPropertyDescriptor` is set to `true`, the check will take into account the use of `Object.create`, `Object.defineProperty`, `Object.defineProperties`, and `Reflect.defineProperty`."
+        },
+        "includeCommonJSModuleExports": {
+          "description": "If `includeCommonJSModuleExports` is set to `true`, `module.exports` and `module[\"exports\"]` will be checked by this rule.",
+          "default": false,
+          "type": "boolean",
+          "markdownDescription": "If `includeCommonJSModuleExports` is set to `true`, `module.exports` and `module[\"exports\"]` will be checked by this rule."
+        }
+      },
+      "additionalProperties": false
+    },
+    "FuncNameMatchingMode": {
+      "type": "string",
+      "enum": [
+        "always",
+        "never"
       ]
     },
     "FuncNames": {
