@@ -39,6 +39,13 @@ fn readonly_var_unsafe_preceding_read() {
     // A preceding statement reads the var before its initializer runs;
     // the read must observe `undefined`, not the constant.
     test_smallest("var y = foo; var foo = 1; log(y);", "var y = foo, foo = 1; log(y);");
+
+    // Canonical hoisting trap: the name is used directly before its own `var`
+    // declaration, so the read sees the hoisted `undefined`. `console.log(a)`
+    // must print `undefined`, never `0`. Doubly guarded — the read is in the
+    // same call frame (does not cross a function boundary) and the preceding
+    // call ends the declarative prelude.
+    test_smallest("console.log(a); var a = 0;", "console.log(a); var a = 0;");
 }
 
 #[test]
