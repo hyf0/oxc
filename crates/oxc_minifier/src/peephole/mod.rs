@@ -18,7 +18,6 @@ mod replace_known_methods;
 mod substitute_alternate_syntax;
 
 use oxc_ast_visit::{Visit, walk::walk_call_expression};
-use oxc_data_structures::stack::NonEmptyStack;
 use oxc_semantic::Scoping;
 use oxc_syntax::{
     scope::{ScopeFlags, ScopeId},
@@ -79,34 +78,37 @@ impl<'a> PeepholeOptimizations {
     /// Type-only declarations (`type`, `interface`) are erased and never run.
     fn is_declarative_body_statement(stmt: &Statement<'a>) -> bool {
         match stmt {
-            Statement::FunctionDeclaration(_)
-            | Statement::EmptyStatement(_)
+            Statement::EmptyStatement(_)
             | Statement::ImportDeclaration(_)
-            | Statement::ExportAllDeclaration(_)
-            | Statement::TSTypeAliasDeclaration(_)
-            | Statement::TSInterfaceDeclaration(_) => true,
-            Statement::VariableDeclaration(decl) => Self::is_declarative_variable_declaration(decl),
-            Statement::ExportNamedDeclaration(e) => match &e.declaration {
-                // `export { foo }`, `export { foo } from './x'`, `export type {…}`,
-                // `export type T = …`, `export interface I {}` — no executable code
-                // at the statement itself. The cyclic-eval hazard from the `from`
-                // source is gated separately by `module_has_loaders` (see
-                // `enter_program`).
-                None
-                | Some(
-                    Declaration::FunctionDeclaration(_)
-                    | Declaration::TSTypeAliasDeclaration(_)
-                    | Declaration::TSInterfaceDeclaration(_),
-                ) => true,
-                Some(Declaration::VariableDeclaration(decl)) => {
-                    Self::is_declarative_variable_declaration(decl)
-                }
-                Some(_) => false,
-            },
+            | Statement::ExportAllDeclaration(_) => true,
+            // `export { foo }`, `export { foo } from './x'`, `export type T = …` —
+            // no executable code at the statement itself. The cyclic-eval hazard
+            // from a `from` source is gated separately by `module_has_loaders`.
+            Statement::ExportNamedDeclaration(e) => {
+                e.declaration.as_ref().is_none_or(Self::is_declarative_declaration)
+            }
             // `export default function() {}` is hoisted; `export default <expr>`
             // or `export default class C extends … {}` runs user code.
             Statement::ExportDefaultDeclaration(e) => {
                 matches!(&e.declaration, ExportDefaultDeclarationKind::FunctionDeclaration(_))
+            }
+            // Bare declarations route through the shared classifier; anything else
+            // (blocks, expressions, control flow) can run user code.
+            _ => stmt.as_declaration().is_some_and(Self::is_declarative_declaration),
+        }
+    }
+
+    /// A `Declaration` runs no user code at evaluation: function/type/interface
+    /// declarations are inert, and a `var`/`let`/`const` is declarative only when
+    /// every declarator is a simple binding with a literal (or no) initializer.
+    /// Classes, enums, and TS modules run user code, so they are not declarative.
+    fn is_declarative_declaration(decl: &Declaration<'a>) -> bool {
+        match decl {
+            Declaration::FunctionDeclaration(_)
+            | Declaration::TSTypeAliasDeclaration(_)
+            | Declaration::TSInterfaceDeclaration(_) => true,
+            Declaration::VariableDeclaration(decl) => {
+                Self::is_declarative_variable_declaration(decl)
             }
             _ => false,
         }
@@ -431,16 +433,18 @@ impl<'a> Traverse<'a> for PeepholeOptimizations {
     fn enter_program(&mut self, program: &mut Program<'a>, ctx: &mut TraverseCtx<'a>) {
         ctx.state.symbol_values.reset();
         ctx.state.proto_write_symbols.clear();
-        ctx.state.body_unsafe_stack = NonEmptyStack::new((ctx.scoping().root_scope_id(), false));
-        // Static imports hoist, so a lexical "have I seen one yet" check would
-        // miss imports that appear after a leading var. Scan the body once.
-        // Re-exports (`export … from`, `export * from`) also load foreign
-        // modules and create the same cyclic-evaluation hazard.
-        ctx.state.module_has_loaders = program.body.iter().any(|s| match s {
-            Statement::ImportDeclaration(_) | Statement::ExportAllDeclaration(_) => true,
-            Statement::ExportNamedDeclaration(e) => e.source.is_some(),
-            _ => false,
-        });
+        // `enter`/`exit_function_body` are balanced, so the stack is back to its
+        // single program-root entry by the next pass; reset it in place rather
+        // than reallocating (matching the `reset`/`clear` above).
+        *ctx.state.body_unsafe_stack.last_mut() = (ctx.scoping().root_scope_id(), false);
+        // Any module loader (`import`, `export * from`, `export … from`) can,
+        // on a cycle, evaluate a foreign module that observes our not-yet-assigned
+        // bindings. Loaders are hoisted, so scan the whole body (an import may
+        // follow a leading var); the set never changes across passes.
+        ctx.state.module_has_loaders = program
+            .body
+            .iter()
+            .any(|s| s.as_module_declaration().is_some_and(|m| m.source().is_some()));
         // `PassDirty` is managed by the `Compressor` driver via
         // `flush_pass_dirty`, not reset per traversal.
     }

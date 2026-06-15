@@ -58,26 +58,16 @@ impl<'a> PeepholeOptimizations {
         if body_unsafe || ctx.current_scope_id() != body_scope {
             return false;
         }
-        let is_program_body = ctx.state.body_unsafe_stack.len() == 1;
-        if is_program_body && ctx.state.module_has_loaders {
+        // At program scope, a module that loads foreign modules risks a cyclic
+        // importer observing our exports before this var is assigned.
+        if body_scope == ctx.scoping().root_scope_id() && ctx.state.module_has_loaders {
             return false;
         }
-        // Exactly one read, crossing a function boundary. Short-circuit on the
-        // second read since the predicate then fails.
-        let mut single_cross_function_read = false;
-        for r in ctx.scoping().get_resolved_references(symbol_id) {
-            if !r.is_read() {
-                continue;
-            }
-            if single_cross_function_read {
-                return false;
-            }
-            if !Self::read_crosses_function_boundary(r.scope_id(), body_scope, ctx) {
-                return false;
-            }
-            single_cross_function_read = true;
-        }
-        single_cross_function_read
+        // Exactly one read, and it crosses a function boundary.
+        let mut reads = ctx.scoping().get_resolved_references(symbol_id).filter(|r| r.is_read());
+        let Some(read) = reads.next() else { return false };
+        reads.next().is_none()
+            && Self::read_crosses_function_boundary(read.scope_id(), body_scope, ctx)
     }
 
     /// True if the scope chain from `read_scope` to `body_scope` (exclusive of
