@@ -74,7 +74,8 @@ impl<'a> PeepholeOptimizations {
     /// code that observes a subsequent hoisted `var x = <literal>;` as
     /// `undefined`. Module loaders (`import`, `export * from`, `export … from`)
     /// can evaluate foreign modules but only observe our bindings on an actual
-    /// cycle — handled at program scope by the `module_has_loaders` gate.
+    /// cycle — handled at program scope by starting the root prelude unsafe when
+    /// the module has loaders (see `enter_program`).
     /// Type-only declarations (`type`, `interface`) are erased and never run.
     fn is_declarative_body_statement(stmt: &Statement<'a>) -> bool {
         match stmt {
@@ -83,7 +84,8 @@ impl<'a> PeepholeOptimizations {
             | Statement::ExportAllDeclaration(_) => true,
             // `export { foo }`, `export { foo } from './x'`, `export type T = …` —
             // no executable code at the statement itself. The cyclic-eval hazard
-            // from a `from` source is gated separately by `module_has_loaders`.
+            // from a `from` source is gated separately at program scope (see
+            // `enter_program`).
             Statement::ExportNamedDeclaration(e) => {
                 e.declaration.as_ref().is_none_or(Self::is_declarative_declaration)
             }
@@ -433,18 +435,21 @@ impl<'a> Traverse<'a> for PeepholeOptimizations {
     fn enter_program(&mut self, program: &mut Program<'a>, ctx: &mut TraverseCtx<'a>) {
         ctx.state.symbol_values.reset();
         ctx.state.proto_write_symbols.clear();
-        // `enter`/`exit_function_body` are balanced, so the stack is back to its
-        // single program-root entry by the next pass; reset it in place rather
-        // than reallocating (matching the `reset`/`clear` above).
-        *ctx.state.body_unsafe_stack.last_mut() = (ctx.scoping().root_scope_id(), false);
-        // Any module loader (`import`, `export * from`, `export … from`) can,
-        // on a cycle, evaluate a foreign module that observes our not-yet-assigned
-        // bindings. Loaders are hoisted, so scan the whole body (an import may
-        // follow a leading var); the set never changes across passes.
-        ctx.state.module_has_loaders = program
+        // Any module loader (`import`, `export * from`, `export … from`) can, on a
+        // cycle, evaluate a foreign module that observes a not-yet-assigned binding
+        // our exports close over. So the program root starts its prelude "unsafe"
+        // when the body has any loader — bailing every program-scope var inline.
+        // Loaders are hoisted, so scan the whole body (an import may follow a
+        // leading var); the result never changes across passes.
+        let module_has_loaders = program
             .body
             .iter()
             .any(|s| s.as_module_declaration().is_some_and(|m| m.source().is_some()));
+        // `enter`/`exit_function_body` are balanced, so the stack is back to its
+        // single program-root entry by the next pass; reset it in place rather
+        // than reallocating (matching the `reset`/`clear` above).
+        *ctx.state.body_unsafe_stack.last_mut() =
+            (ctx.scoping().root_scope_id(), module_has_loaders);
         // `PassDirty` is managed by the `Compressor` driver via
         // `flush_pass_dirty`, not reset per traversal.
     }
