@@ -189,6 +189,40 @@ const categories: Category[] = [
     optionSets: [{ printWidth: 80 }, { printWidth: 100 }],
     notes: {},
   },
+  {
+    name: "scss",
+    sources: [
+      { dir: join(EXTERNALS_DIR, "vue-vben-admin"), ext: ".scss" },
+      { dir: join(EXTERNALS_DIR, "gitlab"), ext: ".scss" },
+    ],
+    optionSets: [{ printWidth: 80 }, { printWidth: 100 }],
+    notes: {
+      "externals/gitlab/stylesheets/framework/diffs.scss":
+        "Allowed: media-query operator spacing; Prettier can't space arithmetic ops (prettier/prettier#1811)",
+      "externals/gitlab/stylesheets/page_bundles/editor.scss":
+        "Allowed: media-query operator spacing; Prettier can't space arithmetic ops (prettier/prettier#1811)",
+      "externals/gitlab/stylesheets/page_bundles/issuable_list.scss":
+        "Allowed: media-query operator spacing; Prettier can't space arithmetic ops (prettier/prettier#1811)",
+      "externals/gitlab/stylesheets/page_bundles/labels.scss":
+        "Allowed: media-query operator spacing; Prettier can't space arithmetic ops (prettier/prettier#1811)",
+      "externals/gitlab/stylesheets/page_bundles/environments.scss":
+        "Allowed: media-query operator spacing; Prettier can't space arithmetic ops (prettier/prettier#1811)",
+      "externals/gitlab/stylesheets/page_bundles/merge_requests.scss":
+        "Allowed: media-query operator spacing; Prettier can't space arithmetic ops (prettier/prettier#1811)",
+      "externals/gitlab/stylesheets/page_bundles/settings.scss":
+        "Allowed: media-query operator spacing; Prettier can't space arithmetic ops (prettier/prettier#1811)",
+      "externals/gitlab/stylesheets/pages/settings.scss":
+        "Allowed: media-query operator spacing; Prettier can't space arithmetic ops (prettier/prettier#1811)",
+      "externals/gitlab/stylesheets/page_bundles/projects.scss":
+        "Allowed: media-query operator spacing; Prettier can't space arithmetic ops (prettier/prettier#1811)",
+      "externals/gitlab/stylesheets/highlight/conflict_colors.scss":
+        "Allowed: Prettier drops blank lines in SCSS maps with paren values; ours preserves (prettier/prettier#16824)",
+      "externals/gitlab/stylesheets/highlight/white_base.scss":
+        "Allowed: Prettier extra-indents wrapped :not() args; ours single-indents (prettier/prettier#16165)",
+      "externals/gitlab/stylesheets/framework/sidebar.scss":
+        "Allowed (layout-only): :not() wrap indent (prettier/prettier#16165) + long-expr line-break position",
+    },
+  },
 ];
 
 // ---
