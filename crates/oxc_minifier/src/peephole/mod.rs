@@ -120,6 +120,9 @@ impl<'a> PeepholeOptimizations {
         decl.declarations.iter().all(Self::is_declarative_variable_declarator)
     }
 
+    /// Note: only AST `Literal`s qualify. Constant-but-non-literal initializers
+    /// (`-1`, `void 0`, `1 + 2`) run no user code either, but conservatively end
+    /// the prelude here — a missed optimization, never a correctness risk.
     fn is_declarative_variable_declarator(decl: &VariableDeclarator<'a>) -> bool {
         matches!(decl.id, BindingPattern::BindingIdentifier(_))
             && decl.init.as_ref().is_none_or(Expression::is_literal)

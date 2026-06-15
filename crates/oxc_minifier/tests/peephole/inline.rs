@@ -49,6 +49,33 @@ fn readonly_var_reassigned() {
 }
 
 #[test]
+fn readonly_var_reassigned_cross_function_read() {
+    // The read crosses a function boundary (the gap this path targets), but
+    // `foo` is also reassigned. The predicate's read-loop ignores writes, so it
+    // relies on the downstream `write_references_count` guard in
+    // `inline_identifier_reference` to block inlining — substituting `1` would be
+    // wrong once `foo = 2` runs before `f()` is called.
+    test_smallest(
+        "var foo = 1; foo = 2; function f() { return foo; } log(f());",
+        "var foo = 1; foo = 2; function f() { return foo; } log(f());",
+    );
+}
+
+#[test]
+fn readonly_var_reader_declared_before_var() {
+    // Known limitation: when the reading function is declared *before* the var,
+    // the symbol's constant isn't recorded until `exit_variable_declarator` —
+    // after `f`'s body (and its `foo` reference) was already visited in source
+    // order. The in-pass design can't reach back, so this otherwise-safe case is
+    // conservatively left un-inlined. Asserted to make any future improvement a
+    // conscious change rather than a silent one.
+    test_smallest(
+        "function f() { return foo; } var foo = true; log(f());",
+        "function f() { return foo; } var foo = !0; log(f());",
+    );
+}
+
+#[test]
 fn readonly_var_with_imports_present() {
     // A circular importer can observe ANY module-private var our exported
     // functions/classes close over, regardless of export status. As long as the

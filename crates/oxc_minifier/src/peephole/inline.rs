@@ -41,6 +41,11 @@ impl<'a> PeepholeOptimizations {
     ///   (multi-use and same-call-frame reads are handled by
     ///   `inline_identifier_reference`'s small-value rule or by
     ///   `substitute_single_use_symbol`).
+    ///
+    /// Limitation: the constant is recorded here at the declarator's exit, so a
+    /// reader in a function declared *before* the var in source order has
+    /// already been visited and won't be inlined. Safe but suboptimal; the
+    /// common "flag declared at the top" pattern is unaffected.
     fn is_hoisted_var_inlineable(
         decl: &VariableDeclarator<'a>,
         symbol_id: SymbolId,
