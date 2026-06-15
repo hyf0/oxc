@@ -409,8 +409,43 @@ impl Linter {
                             .iter()
                             .map(|label| (label.offset(), label.len(), label.primary()))
                             .collect::<Vec<_>>();
-                        let fix_span = m.fixes.span();
-                        (labels, m.error.code.clone(), (m.span.start, m.span.end), (fix_span.start, fix_span.end))
+                        let fixes = match &m.fixes {
+                            PossibleFixes::None => Vec::new(),
+                            PossibleFixes::Single(fix) => vec![(
+                                fix.content.clone(),
+                                fix.message.clone(),
+                                fix.kind,
+                                (fix.span.start, fix.span.end),
+                            )],
+                            PossibleFixes::Multiple(fixes) => fixes
+                                .iter()
+                                .map(|fix| {
+                                    (
+                                        fix.content.clone(),
+                                        fix.message.clone(),
+                                        fix.kind,
+                                        (fix.span.start, fix.span.end),
+                                    )
+                                })
+                                .collect::<Vec<_>>(),
+                        };
+                        let rule = m
+                            .rule
+                            .as_ref()
+                            .map(|rule| (rule.plugin_name.clone(), rule.rule_name.clone()));
+                        (
+                            labels,
+                            m.error.message.clone(),
+                            m.error.help.clone(),
+                            m.error.note.clone(),
+                            m.error.severity,
+                            m.error.code.clone(),
+                            m.error.url.clone(),
+                            (m.span.start, m.span.end),
+                            fixes,
+                            m.section_offset,
+                            rule,
+                        )
                     };
                     sorted_optimized.sort_unstable_by_key(sort);
                     sorted_unoptimized.sort_unstable_by_key(sort);
