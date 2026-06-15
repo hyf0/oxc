@@ -399,61 +399,82 @@ impl Linter {
                         unoptimized_diagnostics.len()
                     );
 
+                    let mut sorted_optimized = optimized_diagnostics.iter().collect::<Vec<_>>();
+                    let mut sorted_unoptimized = unoptimized_diagnostics.iter().collect::<Vec<_>>();
 
-                    let mut sorted_optimized = optimized_diagnostics.to_vec();
-                    let mut sorted_unoptimized = unoptimized_diagnostics.to_vec();
-                    let sort = |m: &Message| {
-                        let labels = m
-                            .error
+                    fn cmp_fixes(left: &PossibleFixes, right: &PossibleFixes) -> std::cmp::Ordering {
+                        fn fix_key(fix: &Fix) -> (&str, Option<&str>, FixKind, (u32, u32)) {
+                            (
+                                fix.content.as_ref(),
+                                fix.message.as_deref(),
+                                fix.kind,
+                                (fix.span.start, fix.span.end),
+                            )
+                        }
+                        let cmp_fix_iter = |left: &[Fix], right: &[Fix]| {
+                            left.iter().map(fix_key).cmp(right.iter().map(fix_key))
+                        };
+
+                        match (left, right) {
+                            (PossibleFixes::None, PossibleFixes::None) => std::cmp::Ordering::Equal,
+                            (PossibleFixes::None, _) => std::cmp::Ordering::Less,
+                            (_, PossibleFixes::None) => std::cmp::Ordering::Greater,
+                            (PossibleFixes::Single(left), PossibleFixes::Single(right)) => {
+                                fix_key(left).cmp(&fix_key(right))
+                            }
+                            (PossibleFixes::Single(left), PossibleFixes::Multiple(right)) => {
+                                cmp_fix_iter(std::slice::from_ref(left), right)
+                            }
+                            (PossibleFixes::Multiple(left), PossibleFixes::Single(right)) => {
+                                cmp_fix_iter(left, std::slice::from_ref(right))
+                            }
+                            (PossibleFixes::Multiple(left), PossibleFixes::Multiple(right)) => {
+                                cmp_fix_iter(left, right)
+                            }
+                        }
+                    }
+
+                    fn cmp_diagnostics(left: &Message, right: &Message) -> std::cmp::Ordering {
+                        left.error
                             .labels
                             .iter()
                             .map(|label| (label.offset(), label.len(), label.primary()))
-                            .collect::<Vec<_>>();
-                        let fixes = match &m.fixes {
-                            PossibleFixes::None => Vec::new(),
-                            PossibleFixes::Single(fix) => vec![(
-                                fix.content.clone(),
-                                fix.message.clone(),
-                                fix.kind,
-                                (fix.span.start, fix.span.end),
-                            )],
-                            PossibleFixes::Multiple(fixes) => fixes
-                                .iter()
-                                .map(|fix| {
-                                    (
-                                        fix.content.clone(),
-                                        fix.message.clone(),
-                                        fix.kind,
-                                        (fix.span.start, fix.span.end),
-                                    )
-                                })
-                                .collect::<Vec<_>>(),
-                        };
-                        let rule = m
-                            .rule
-                            .as_ref()
-                            .map(|rule| (rule.plugin_name.clone(), rule.rule_name.clone()));
-                        (
-                            labels,
-                            m.error.message.clone(),
-                            m.error.help.clone(),
-                            m.error.note.clone(),
-                            m.error.severity,
-                            m.error.code.clone(),
-                            m.error.url.clone(),
-                            (m.span.start, m.span.end),
-                            fixes,
-                            m.section_offset,
-                            rule,
-                        )
-                    };
-                    sorted_optimized.sort_unstable_by_key(sort);
-                    sorted_unoptimized.sort_unstable_by_key(sort);
+                            .cmp(right.error.labels.iter().map(|label| {
+                                (label.offset(), label.len(), label.primary())
+                            }))
+                            .then_with(|| left.error.message.cmp(&right.error.message))
+                            .then_with(|| left.error.help.cmp(&right.error.help))
+                            .then_with(|| left.error.note.cmp(&right.error.note))
+                            .then_with(|| left.error.severity.cmp(&right.error.severity))
+                            .then_with(|| left.error.code.cmp(&right.error.code))
+                            .then_with(|| left.error.url.cmp(&right.error.url))
+                            .then_with(|| {
+                                (left.span.start, left.span.end)
+                                    .cmp(&(right.span.start, right.span.end))
+                            })
+                            .then_with(|| cmp_fixes(&left.fixes, &right.fixes))
+                            .then_with(|| left.section_offset.cmp(&right.section_offset))
+                            .then_with(|| {
+                                left.rule
+                                    .as_ref()
+                                    .map(|rule| {
+                                        (rule.plugin_name.as_ref(), rule.rule_name.as_ref())
+                                    })
+                                    .cmp(&right.rule.as_ref().map(|rule| {
+                                        (rule.plugin_name.as_ref(), rule.rule_name.as_ref())
+                                    }))
+                            })
+                    }
 
-                    for (opt_diag, unopt_diag) in sorted_optimized.iter().zip(sorted_unoptimized.iter()){
+                    sorted_optimized.sort_unstable_by(|left, right| cmp_diagnostics(left, right));
+                    sorted_unoptimized.sort_unstable_by(|left, right| cmp_diagnostics(left, right));
+
+                    for (opt_diag, unopt_diag) in
+                        sorted_optimized.iter().zip(sorted_unoptimized.iter())
+                    {
                         assert_eq!(
-                            opt_diag,
-                            unopt_diag,
+                            *opt_diag,
+                            *unopt_diag,
                             "Diagnostic differs between optimized and unoptimized runs",
                         );
                     }
